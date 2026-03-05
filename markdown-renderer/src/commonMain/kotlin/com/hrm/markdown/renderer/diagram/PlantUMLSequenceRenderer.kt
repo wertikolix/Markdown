@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -131,11 +132,12 @@ private fun <K, V> mutableLinkedMapOf(): LinkedHashMap<K, V> = LinkedHashMap()
 
 // ─── Layout & Drawing ───
 
-private const val PARTICIPANT_PAD_H = 16f
-private const val PARTICIPANT_PAD_V = 8f
-private const val PARTICIPANT_GAP = 120f
-private const val MESSAGE_ROW_H = 48f
-private const val TOP_MARGIN = 10f
+private const val PARTICIPANT_PAD_H = 20f
+private const val PARTICIPANT_PAD_V = 10f
+private const val MIN_PARTICIPANT_GAP = 80f
+private const val MESSAGE_LABEL_MARGIN = 24f  // extra margin around message labels
+private const val MESSAGE_ROW_H = 56f
+private const val TOP_MARGIN = 16f
 private const val LIFELINE_DASH = 6f
 
 private val PARTICIPANT_FILL = Color(0xFFE8F4FD)
@@ -145,11 +147,79 @@ private val MSG_COLOR = Color(0xFF374151)
 private val MSG_LABEL_COLOR = Color(0xFF1F2937)
 private val LIFELINE_COLOR = Color(0xFFD1D5DB)
 
+/**
+ * Calculate dynamic gaps between adjacent participants based on message label widths.
+ * Returns an array of gaps where gaps[i] is the center-to-center distance between participant i and i+1.
+ */
+private fun calculateParticipantGaps(
+    data: SequenceDiagramData,
+    partWidths: List<Float>,
+    measureText: (String) -> Pair<Float, Float>,
+): List<Float> {
+    val n = data.participants.size
+    if (n <= 1) return emptyList()
+
+    val partIdToIndex = data.participants.withIndex().associate { (idx, p) -> p.id to idx }
+
+    // For each pair of adjacent participants, find the max message label width spanning that gap
+    // A message from index i to index j spans gaps [min(i,j), min(i,j)+1, ..., max(i,j)-1]
+    // We need to ensure the total distance covers the label
+    // For simplicity, distribute label width requirement to each spanned gap
+
+    // First, calculate the minimum gap based on participant box widths
+    val minGaps = (0 until n - 1).map { i ->
+        max(partWidths[i] / 2 + partWidths[i + 1] / 2 + 20f, MIN_PARTICIPANT_GAP)
+    }.toMutableList()
+
+    // For messages between directly adjacent participants, ensure gap accommodates label
+    for (msg in data.messages) {
+        val fromIdx = partIdToIndex[msg.from] ?: continue
+        val toIdx = partIdToIndex[msg.to] ?: continue
+        if (fromIdx == toIdx) continue
+
+        val lo = minOf(fromIdx, toIdx)
+        val hi = maxOf(fromIdx, toIdx)
+        val spanCount = hi - lo
+
+        if (msg.label.isNotBlank()) {
+            val (labelW, _) = measureText(msg.label)
+            val requiredPerGap = (labelW + MESSAGE_LABEL_MARGIN) / spanCount
+            for (g in lo until hi) {
+                minGaps[g] = max(minGaps[g], requiredPerGap)
+            }
+        }
+    }
+
+    return minGaps
+}
+
+/**
+ * Calculate participant center X positions based on dynamic gaps.
+ */
+private fun calculatePartCenterXs(
+    partWidths: List<Float>,
+    gaps: List<Float>,
+): List<Float> {
+    val xs = mutableListOf<Float>()
+    var x = 30f + partWidths[0] / 2
+    xs.add(x)
+    for (i in gaps.indices) {
+        x += gaps[i]
+        xs.add(x)
+    }
+    return xs
+}
+
 internal fun DrawScope.drawSequenceDiagram(
     data: SequenceDiagramData,
     textMeasurer: TextMeasurer,
 ) {
     if (data.participants.isEmpty()) return
+
+    val measureText: (String) -> Pair<Float, Float> = { text ->
+        val result = textMeasurer.measure(text, style = TextStyle(fontSize = 13.sp))
+        Pair(result.size.width.toFloat(), result.size.height.toFloat())
+    }
 
     // Measure participant labels
     val partMeasures = data.participants.map { p ->
@@ -163,25 +233,9 @@ internal fun DrawScope.drawSequenceDiagram(
     val partWidths = partMeasures.map { max(it.second + PARTICIPANT_PAD_H * 2, 80f) }
     val partHeight = partMeasures.maxOfOrNull { it.third + PARTICIPANT_PAD_V * 2 } ?: 36f
 
-    // Calculate x positions for each participant center
-    val partCenterXs = mutableListOf<Float>()
-    var x = 30f
-    for (i in data.participants.indices) {
-        partCenterXs.add(x + partWidths[i] / 2)
-        x += partWidths[i] + PARTICIPANT_GAP - partWidths[i] // Use gap as center-to-center
-        if (i < data.participants.lastIndex) {
-            val nextW = partWidths[i + 1]
-            x = partCenterXs.last() + PARTICIPANT_GAP
-        }
-    }
-    // Recalculate with proper center-to-center gap
-    partCenterXs.clear()
-    x = 30f + partWidths[0] / 2
-    partCenterXs.add(x)
-    for (i in 1 until data.participants.size) {
-        x += PARTICIPANT_GAP
-        partCenterXs.add(x)
-    }
+    // Calculate dynamic gaps and positions
+    val gaps = calculateParticipantGaps(data, partWidths, measureText)
+    val partCenterXs = calculatePartCenterXs(partWidths, gaps)
 
     val boxY = TOP_MARGIN
     val lifelineStartY = boxY + partHeight
@@ -211,7 +265,6 @@ internal fun DrawScope.drawSequenceDiagram(
         if (p.type == ParticipantType.ACTOR) {
             drawActor(cx, boxY, partHeight, textMeasurer, p.label)
         } else {
-            // Rectangle box
             val bx = cx - w / 2
             drawRoundRect(
                 PARTICIPANT_FILL,
@@ -374,10 +427,12 @@ internal fun calculateSequenceDiagramSize(
         th + PARTICIPANT_PAD_V * 2
     } ?: 36f
 
-    val totalW = 30f + partWidths[0] / 2 + (data.participants.size - 1) * PARTICIPANT_GAP +
-            partWidths.last() / 2 + 30f
+    // Use dynamic gaps based on message label widths
+    val gaps = calculateParticipantGaps(data, partWidths, measureText)
+    val totalGaps = gaps.sumOf { it.toDouble() }.toFloat()
+
+    val totalW = 30f + partWidths[0] / 2 + totalGaps + partWidths.last() / 2 + 30f
     val messagesH = data.messages.size * MESSAGE_ROW_H
-    // Top box + lifeline + messages + bottom box + margins
     val totalH = TOP_MARGIN + partHeight + 20f + messagesH + 20f + partHeight + TOP_MARGIN
 
     return Size(totalW, totalH)
@@ -391,6 +446,7 @@ internal fun PlantUMLSequenceDiagram(
     modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
     val data = remember(code) { parsePlantUMLSequence(code) }
 
     if (data == null || data.participants.isEmpty()) {
@@ -405,15 +461,18 @@ internal fun PlantUMLSequenceDiagram(
         }
     }
 
+    // textMeasurer returns pixel values, convert to dp for Modifier sizing
+    val canvasWidthDp = with(density) { canvasSize.width.toDp() }
+    val canvasHeightDp = with(density) { canvasSize.height.toDp() }
+
     Box(
         modifier = modifier
-            .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
     ) {
         Canvas(
             modifier = Modifier
-                .width(canvasSize.width.dp)
-                .height(canvasSize.height.dp)
+                .width(canvasWidthDp + 8.dp)
+                .height(canvasHeightDp + 8.dp)
                 .padding(4.dp),
         ) {
             drawSequenceDiagram(data, textMeasurer)

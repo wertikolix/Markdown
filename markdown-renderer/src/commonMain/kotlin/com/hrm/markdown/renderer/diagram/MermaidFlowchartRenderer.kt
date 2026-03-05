@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -226,12 +227,13 @@ private fun parseNodeDef(raw: String): FlowNode {
 
 // ─── Layout Engine ───
 
-private const val NODE_H_PAD = 24f
-private const val NODE_V_PAD = 12f
-private const val H_GAP = 60f
-private const val V_GAP = 60f
-private const val MIN_NODE_W = 80f
-private const val MIN_NODE_H = 40f
+private const val NODE_H_PAD = 28f
+private const val NODE_V_PAD = 14f
+private const val MIN_H_GAP = 60f
+private const val MIN_V_GAP = 50f
+private const val EDGE_LABEL_MARGIN = 24f  // extra margin around edge labels
+private const val MIN_NODE_W = 90f
+private const val MIN_NODE_H = 44f
 
 internal fun layoutFlowchart(
     data: FlowchartData,
@@ -300,14 +302,49 @@ internal fun layoutFlowchart(
     val layouts = mutableListOf<NodeLayout>()
     val nodeLayoutMap = mutableMapOf<String, NodeLayout>()
 
+    // Build a map from nodeId to its layer index
+    val nodeLayerMap = mutableMapOf<String, Int>()
+    for ((layerIdx, layer) in layers.withIndex()) {
+        for (nodeId in layer) {
+            nodeLayerMap[nodeId] = layerIdx
+        }
+    }
+
+    // Calculate dynamic inter-layer gaps based on edge label sizes
+    // For vertical: gap between layer i and i+1 is based on labels of edges from layer i to i+1
+    // For horizontal: same but for horizontal spacing
+    val interLayerGaps = (0 until (layers.size - 1).coerceAtLeast(0)).map { i ->
+        var maxLabelSize = 0f
+        for (edge in data.edges) {
+            val fromLayer = nodeLayerMap[edge.from] ?: continue
+            val toLayer = nodeLayerMap[edge.to] ?: continue
+            val lo = minOf(fromLayer, toLayer)
+            val hi = maxOf(fromLayer, toLayer)
+            if (lo <= i && hi > i && edge.label.isNotBlank()) {
+                val (lw, lh) = measureText(edge.label)
+                val spanCount = hi - lo
+                if (isVertical) {
+                    maxLabelSize = max(maxLabelSize, (lh + EDGE_LABEL_MARGIN) / spanCount)
+                } else {
+                    maxLabelSize = max(maxLabelSize, (lw + EDGE_LABEL_MARGIN) / spanCount)
+                }
+            }
+        }
+        if (isVertical) max(MIN_V_GAP, maxLabelSize) else max(MIN_H_GAP, maxLabelSize)
+    }
+
+    // Also compute dynamic in-layer gaps (for nodes within same layer in vertical mode)
+    // This ensures sibling nodes don't overlap when edge labels between them are wide
+    val H_GAP = MIN_H_GAP  // in-layer gap for vertical, keep as min
+    val V_GAP = MIN_V_GAP  // in-layer gap for horizontal, keep as min
+
     if (isVertical) {
         var y = padding
-        for (layer in layers) {
+        for ((layerIdx, layer) in layers.withIndex()) {
             val layerHeight = layer.maxOfOrNull { nodeSizes[it]?.second ?: MIN_NODE_H } ?: MIN_NODE_H
             val totalWidth = layer.sumOf { (nodeSizes[it]?.first ?: MIN_NODE_W).toDouble() }.toFloat() +
                     (layer.size - 1) * H_GAP
             var x = padding + (if (layer.size == 1) {
-                // Center single nodes relative to widest layer
                 val maxLayerWidth = layers.maxOfOrNull { l ->
                     l.sumOf { (nodeSizes[it]?.first ?: MIN_NODE_W).toDouble() }.toFloat() +
                             (l.size - 1) * H_GAP
@@ -323,13 +360,14 @@ internal fun layoutFlowchart(
                 nodeLayoutMap[nodeId] = layout
                 x += w + H_GAP
             }
-            y += layerHeight + V_GAP
+            val gap = interLayerGaps.getOrElse(layerIdx) { MIN_V_GAP }
+            y += layerHeight + gap
         }
     } else {
         // LR / RL
         var x = padding
         if (data.direction == FlowDirection.RL) layers.reverse()
-        for (layer in layers) {
+        for ((layerIdx, layer) in layers.withIndex()) {
             val layerWidth = layer.maxOfOrNull { nodeSizes[it]?.first ?: MIN_NODE_W } ?: MIN_NODE_W
             val totalHeight = layer.sumOf { (nodeSizes[it]?.second ?: MIN_NODE_H).toDouble() }.toFloat() +
                     (layer.size - 1) * V_GAP
@@ -349,7 +387,8 @@ internal fun layoutFlowchart(
                 nodeLayoutMap[nodeId] = layout
                 y += h + V_GAP
             }
-            x += layerWidth + H_GAP
+            val gap = interLayerGaps.getOrElse(layerIdx) { MIN_H_GAP }
+            x += layerWidth + gap
         }
     }
 
@@ -595,6 +634,7 @@ internal fun MermaidFlowchartDiagram(
     modifier: Modifier = Modifier,
 ) {
     val textMeasurer = rememberTextMeasurer()
+    val density = LocalDensity.current
     val data = remember(code) { parseMermaidFlowchart(code) }
 
     if (data == null || data.nodes.isEmpty()) {
@@ -612,15 +652,18 @@ internal fun MermaidFlowchartDiagram(
         }
     }
 
+    // textMeasurer returns pixel values, convert to dp for Modifier sizing
+    val canvasWidthDp = with(density) { canvasSize.width.toDp() }
+    val canvasHeightDp = with(density) { canvasSize.height.toDp() }
+
     Box(
         modifier = modifier
-            .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
     ) {
         Canvas(
             modifier = Modifier
-                .width((canvasSize.width / 1).dp)
-                .height((canvasSize.height / 1).dp)
+                .width(canvasWidthDp + 8.dp)
+                .height(canvasHeightDp + 8.dp)
                 .padding(4.dp),
         ) {
             drawFlowchart(data, layouts, textMeasurer)
