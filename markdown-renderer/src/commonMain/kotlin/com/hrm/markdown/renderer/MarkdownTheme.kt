@@ -93,6 +93,18 @@ data class MarkdownTheme(
     val subscriptStyle: SpanStyle = SpanStyle(fontSize = 12.sp),
     /** 插入文本样式 */
     val insertedTextStyle: SpanStyle = SpanStyle(textDecoration = TextDecoration.Underline),
+    /** 键盘按键样式 */
+    val kbdStyle: SpanStyle = SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Medium,
+    ),
+    /** 键盘按键背景色 */
+    val kbdBackground: Color = Color(0xFFEFF1F3),
+    /** 缩写提示样式（带虚线下划线） */
+    val abbreviationStyle: SpanStyle = SpanStyle(
+        textDecoration = TextDecoration.Underline,
+    ),
 )
 
 @Immutable

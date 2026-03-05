@@ -97,4 +97,47 @@ object CharacterUtils {
         return label.trim().replace(Regex("\\s+"), " ").lowercase()
     }
 
+    /**
+     * 对 URL 中的特殊字符进行百分号编码。
+     * 保留已编码的 %XX 序列和 URL 合法字符，仅编码非法字符。
+     */
+    fun percentEncodeUrl(url: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < url.length) {
+            val c = url[i]
+            when {
+                // 保留已有的百分号编码
+                c == '%' && i + 2 < url.length &&
+                        url[i + 1].isHexDigit() && url[i + 2].isHexDigit() -> {
+                    sb.append(url, i, i + 3)
+                    i += 3
+                }
+                // URL 合法字符不编码（仅 ASCII 范围）
+                c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' ||
+                        c in "-._~:/?#[]@!$&'()*+,;=" -> {
+                    sb.append(c)
+                    i++
+                }
+                else -> {
+                    // 对非 ASCII 字符进行 UTF-8 百分号编码
+                    val str = c.toString()
+                    val bytes = str.encodeToByteArray()
+                    for (b in bytes) {
+                        sb.append('%')
+                        sb.append(HEX_DIGITS[(b.toInt() and 0xFF) shr 4])
+                        sb.append(HEX_DIGITS[b.toInt() and 0x0F])
+                    }
+                    i++
+                }
+            }
+        }
+        return sb.toString()
+    }
+
+    private fun Char.isHexDigit(): Boolean =
+        this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
+
+    private val HEX_DIGITS = "0123456789ABCDEF".toCharArray()
+
 }

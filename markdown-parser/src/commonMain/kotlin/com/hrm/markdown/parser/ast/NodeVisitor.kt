@@ -30,6 +30,8 @@ interface NodeVisitor<R> {
     fun visitAdmonition(node: Admonition): R
     fun visitFrontMatter(node: FrontMatter): R
     fun visitBlankLine(node: BlankLine): R
+    fun visitTocPlaceholder(node: TocPlaceholder): R
+    fun visitAbbreviationDefinition(node: AbbreviationDefinition): R
 
     // 行内节点
     fun visitText(node: Text): R
@@ -52,6 +54,8 @@ interface NodeVisitor<R> {
     fun visitSubscript(node: Subscript): R
     fun visitInsertedText(node: InsertedText): R
     fun visitEmoji(node: Emoji): R
+    fun visitAbbreviation(node: Abbreviation): R
+    fun visitKeyboardInput(node: KeyboardInput): R
 }
 
 /**
@@ -84,6 +88,8 @@ abstract class DefaultNodeVisitor<R>(private val defaultValue: R) : NodeVisitor<
     override fun visitAdmonition(node: Admonition): R = defaultValue
     override fun visitFrontMatter(node: FrontMatter): R = defaultValue
     override fun visitBlankLine(node: BlankLine): R = defaultValue
+    override fun visitTocPlaceholder(node: TocPlaceholder): R = defaultValue
+    override fun visitAbbreviationDefinition(node: AbbreviationDefinition): R = defaultValue
     override fun visitText(node: Text): R = defaultValue
     override fun visitSoftLineBreak(node: SoftLineBreak): R = defaultValue
     override fun visitHardLineBreak(node: HardLineBreak): R = defaultValue
@@ -104,4 +110,6 @@ abstract class DefaultNodeVisitor<R>(private val defaultValue: R) : NodeVisitor<
     override fun visitSubscript(node: Subscript): R = defaultValue
     override fun visitInsertedText(node: InsertedText): R = defaultValue
     override fun visitEmoji(node: Emoji): R = defaultValue
+    override fun visitAbbreviation(node: Abbreviation): R = defaultValue
+    override fun visitKeyboardInput(node: KeyboardInput): R = defaultValue
 }

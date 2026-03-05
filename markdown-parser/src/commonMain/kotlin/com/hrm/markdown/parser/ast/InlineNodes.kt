@@ -175,3 +175,23 @@ class Emoji(
 ) : LeafNode() {
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitEmoji(this)
 }
+
+/**
+ * 缩写：在正文中出现的缩写词，关联到 AbbreviationDefinition。
+ */
+class Abbreviation(
+    var abbreviation: String = "",
+    var fullText: String = ""
+) : LeafNode() {
+    override val literal: String get() = abbreviation
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitAbbreviation(this)
+}
+
+/**
+ * 键盘按键：`<kbd>text</kbd>`。
+ */
+class KeyboardInput(
+    override var literal: String = ""
+) : LeafNode() {
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitKeyboardInput(this)
+}

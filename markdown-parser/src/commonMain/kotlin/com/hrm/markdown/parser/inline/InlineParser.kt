@@ -39,6 +39,7 @@ class InlineParser(
         )
         internal val GFM_URL_REGEX = Regex("""(?:https?://|www\.)[^\s<]*""")
         internal val GFM_EMAIL_REGEX = Regex("""[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*""")
+        internal val KBD_REGEX = Regex("""<kbd>(.*?)</kbd>""", RegexOption.IGNORE_CASE)
     }
 }
 
@@ -250,7 +251,7 @@ private class InlineParserInstance(
                 val autolinkMatch = InlineParser.AUTOLINK_REGEX.find(input, pos)
                 if (autolinkMatch != null && autolinkMatch.range.first == pos) {
                     scanner.pos = autolinkMatch.range.last + 1
-                    appendLL(Autolink(destination = autolinkMatch.groupValues[1], isEmail = false))
+                    appendLL(Autolink(destination = CharacterUtils.percentEncodeUrl(autolinkMatch.groupValues[1]), isEmail = false))
                     return
                 }
 
@@ -259,6 +260,16 @@ private class InlineParserInstance(
                 if (emailMatch != null && emailMatch.range.first == pos) {
                     scanner.pos = emailMatch.range.last + 1
                     appendLL(Autolink(destination = emailMatch.groupValues[1], isEmail = true))
+                    return
+                }
+            }
+
+            // <kbd>...</kbd> 键盘按键标签
+            if (nextChar == 'k' || nextChar == 'K') {
+                val kbdMatch = InlineParser.KBD_REGEX.find(input, pos)
+                if (kbdMatch != null && kbdMatch.range.first == pos) {
+                    scanner.pos = kbdMatch.range.last + 1
+                    appendLL(KeyboardInput(kbdMatch.groupValues[1]))
                     return
                 }
             }
@@ -591,7 +602,8 @@ private class InlineParserInstance(
                     url = trimAutolinkTrailing(url)
                     scanner.pos += url.length
                     val fullUrl = if (url.lowercase().startsWith("www.")) "http://$url" else url
-                    val link = Link(destination = fullUrl)
+                    val encodedUrl = CharacterUtils.percentEncodeUrl(fullUrl)
+                    val link = Link(destination = encodedUrl)
                     link.appendChild(Text(url))
                     appendLL(link)
                     return
@@ -777,7 +789,7 @@ private class InlineParserInstance(
             return Pair("", null)
         }
 
-        val (dest, nextPos) = parseLinkDestination(i) ?: return null
+        val (dest, nextPos, isAngleBracket) = parseLinkDestination(i) ?: return null
         i = nextPos
 
         while (i < input.length && (input[i] == ' ' || input[i] == '\t' || input[i] == '\n')) i++
@@ -792,10 +804,14 @@ private class InlineParserInstance(
 
         if (i >= input.length || input[i] != ')') return null
         scanner.pos = i + 1
-        return Pair(dest, title)
+        // 仅对非尖括号包裹的 URL 进行百分号编码
+        val finalDest = if (!isAngleBracket) CharacterUtils.percentEncodeUrl(dest) else dest
+        return Pair(finalDest, title)
     }
 
-    private fun parseLinkDestination(start: Int): Pair<String, Int>? {
+    private data class LinkDestResult(val dest: String, val nextPos: Int, val isAngleBracket: Boolean)
+
+    private fun parseLinkDestination(start: Int): LinkDestResult? {
         var i = start
         if (i >= input.length) return null
 
@@ -814,7 +830,7 @@ private class InlineParserInstance(
             }
             if (i >= input.length) return null
             i++
-            return Pair(sb.toString(), i)
+            return LinkDestResult(sb.toString(), i, true)
         }
 
         val sb = StringBuilder()
@@ -832,7 +848,7 @@ private class InlineParserInstance(
             }
             i++
         }
-        return Pair(sb.toString(), i)
+        return LinkDestResult(sb.toString(), i, false)
     }
 
     private fun parseLinkTitle(start: Int): Pair<String, Int>? {

@@ -61,6 +61,7 @@ class BlockParser(
         document.clearChildren()
         document.linkDefinitions.clear()
         document.footnoteDefinitions.clear()
+        document.abbreviationDefinitions.clear()
 
         for (lineIdx in 0 until source.lineCount) {
             currentLine = lineIdx
@@ -87,6 +88,15 @@ class BlockParser(
 
         // 解析行内内容
         parseInlineContent(document)
+
+        // 后处理：自动生成标题 ID
+        generateHeadingIds(document)
+
+        // 后处理：GFM 过滤禁止的 HTML 标签
+        filterDisallowedHtml(document)
+
+        // 后处理：缩写替换
+        applyAbbreviations(document)
 
         return document
     }
@@ -342,7 +352,7 @@ class BlockParser(
             is HtmlBlock -> node.htmlType in 1..6
             is ListItem -> true
             is IndentedCodeBlock -> false // 不能中断段落
-            is Table -> true
+            is Table -> true // 表格的 header 来自段落内容，属于段落转换而非打断
             is MathBlock -> true
             else -> true
         }
@@ -770,8 +780,11 @@ class BlockParser(
 
         val head = TableHead()
         val headerRow = TableRow()
-        for ((i, cellContent) in headerCells.withIndex()) {
-            val align = if (i < alignments.size) alignments[i] else Table.Alignment.NONE
+        // 列数以分隔行为准：多余截断，不足补空
+        val colCount = alignments.size
+        for (i in 0 until colCount) {
+            val cellContent = headerCells.getOrElse(i) { "" }
+            val align = alignments[i]
             val cell = TableCell(alignment = align, isHeader = true)
             cell.lineRange = LineRange(tip.contentStartLine, tip.contentStartLine + 1)
             cell.rawContent = cellContent
@@ -973,8 +986,10 @@ class BlockParser(
                 val body = node.children.filterIsInstance<TableBody>().firstOrNull() ?: return
                 val row = TableRow()
                 val alignments = node.columnAlignments
-                for ((i, cellContent) in cells.withIndex()) {
-                    if (i >= alignments.size) break
+                // 列数以分隔行为准：多余截断，不足补空
+                val colCount = alignments.size
+                for (i in 0 until colCount) {
+                    val cellContent = cells.getOrElse(i) { "" }
                     val cell = TableCell(alignment = alignments[i], isHeader = false)
                     cell.lineRange = LineRange(lineIdx, lineIdx + 1)
                     cell.rawContent = cellContent
@@ -1081,8 +1096,20 @@ class BlockParser(
                     (node.parent as? ContainerNode)?.removeChild(node)
                     return
                 }
+
+                // 检查是否为 TOC 占位符
+                if (content == "[TOC]" || content == "[[toc]]") {
+                    val toc = TocPlaceholder()
+                    toc.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
+                    val parent = node.parent as? ContainerNode
+                    parent?.replaceChild(node, toc)
+                    return
+                }
+
                 // 尝试从段落中提取链接引用定义
-                val remaining = extractLinkReferenceDefs(content)
+                var remaining = extractLinkReferenceDefs(content)
+                // 尝试提取缩写定义
+                remaining = extractAbbreviationDefs(remaining)
                 if (remaining.isBlank()) {
                     (node.parent as? ContainerNode)?.removeChild(node)
                 } else {
@@ -1203,14 +1230,28 @@ class BlockParser(
     private fun extractLinkReferenceDefs(content: String): String {
         var remaining = content
         while (true) {
-            val match = LINK_REF_DEF_REGEX.find(remaining) ?: break
-            if (match.range.first != 0) break
+            // 先尝试单行匹配
+            val match = LINK_REF_DEF_REGEX.find(remaining)
+            // 再尝试多行标题匹配（标题在下一行）
+            val multiMatch = LINK_REF_DEF_MULTILINE_TITLE_REGEX.find(remaining)
 
-            val label = CharacterUtils.normalizeLinkLabel(match.groupValues[1])
-            val destination = match.groupValues[2].let {
+            val effectiveMatch = when {
+                match != null && match.range.first == 0 -> match
+                multiMatch != null && multiMatch.range.first == 0 -> multiMatch
+                else -> break
+            }
+
+            val label = CharacterUtils.normalizeLinkLabel(effectiveMatch.groupValues[1])
+            // destination 可能在 group 2（尖括号包裹）或 group 3（裸 URL）
+            val destination = effectiveMatch.groupValues[2].ifEmpty { effectiveMatch.groupValues[3] }.let {
                 if (it.startsWith('<') && it.endsWith('>')) it.drop(1).dropLast(1) else it
             }
-            val title = match.groupValues[4].ifEmpty { null }
+            // title 可能在 group 4（双引号）、5（单引号）或 6（括号）
+            val title = effectiveMatch.groupValues[4].ifEmpty {
+                effectiveMatch.groupValues[5].ifEmpty {
+                    effectiveMatch.groupValues[6].ifEmpty { null }
+                }
+            }
 
             if (label.isNotEmpty() && !document.linkDefinitions.containsKey(label)) {
                 val def = LinkReferenceDefinition(
@@ -1222,7 +1263,7 @@ class BlockParser(
                 document.appendChild(def)
             }
 
-            remaining = remaining.substring(match.range.last + 1).trimStart('\n')
+            remaining = remaining.substring(effectiveMatch.range.last + 1).trimStart('\n')
         }
         return remaining
     }
@@ -1326,10 +1367,259 @@ class BlockParser(
         }
     }
 
+    // ────── 缩写定义提取 ──────
+
+    /**
+     * 从段落内容中提取缩写定义 `*[abbr]: Full Text`。
+     * 返回不属于缩写定义的剩余内容。
+     */
+    private fun extractAbbreviationDefs(content: String): String {
+        var remaining = content
+        while (true) {
+            val match = ABBREVIATION_DEF_REGEX.find(remaining) ?: break
+            if (match.range.first != 0) break
+
+            val abbr = match.groupValues[1]
+            val fullText = match.groupValues[2].trim()
+
+            if (abbr.isNotEmpty() && !document.abbreviationDefinitions.containsKey(abbr)) {
+                val def = AbbreviationDefinition(abbreviation = abbr, fullText = fullText)
+                document.abbreviationDefinitions[abbr] = def
+                document.appendChild(def)
+            }
+
+            remaining = remaining.substring(match.range.last + 1).trimStart('\n')
+        }
+        return remaining
+    }
+
+    // ────── 后处理 ──────
+
+    /**
+     * 自动为所有标题生成 ID（slug），基于标题文本内容。
+     * 已有 customId 的标题不会被覆盖。
+     */
+    private fun generateHeadingIds(doc: Document) {
+        val usedIds = mutableMapOf<String, Int>()
+        for (child in doc.children) {
+            generateHeadingIdsRecursive(child, usedIds)
+        }
+    }
+
+    private fun generateHeadingIdsRecursive(node: Node, usedIds: MutableMap<String, Int>) {
+        when (node) {
+            is Heading -> {
+                if (node.customId == null) {
+                    val text = extractPlainText(node)
+                    val slug = generateSlug(text)
+                    node.autoId = deduplicateId(slug, usedIds)
+                } else {
+                    // 记录 customId 以避免重复
+                    usedIds[node.customId!!] = (usedIds[node.customId!!] ?: 0) + 1
+                }
+            }
+            is SetextHeading -> {
+                val text = extractPlainText(node)
+                val slug = generateSlug(text)
+                node.autoId = deduplicateId(slug, usedIds)
+            }
+            is ContainerNode -> {
+                for (child in node.children) {
+                    generateHeadingIdsRecursive(child, usedIds)
+                }
+            }
+            else -> {}
+        }
+    }
+
+    /**
+     * 从节点中提取纯文本（递归提取所有 Text 节点的内容）。
+     */
+    private fun extractPlainText(node: Node): String {
+        return when (node) {
+            is Text -> node.literal
+            is InlineCode -> node.literal
+            is Emoji -> node.literal
+            is EscapedChar -> node.literal
+            is HtmlEntity -> node.resolved.ifEmpty { node.literal }
+            is SoftLineBreak -> " "
+            is HardLineBreak -> " "
+            is ContainerNode -> node.children.joinToString("") { extractPlainText(it) }
+            else -> ""
+        }
+    }
+
+    /**
+     * 将文本转换为 URL 友好的 slug。
+     * 规则：小写化 → 非字母数字替换为连字符 → 去除首尾/连续连字符。
+     */
+    private fun generateSlug(text: String): String {
+        return text.lowercase()
+            .replace(Regex("[^\\w\\u4e00-\\u9fff-]"), "-")  // 保留中文字符
+            .replace(Regex("-+"), "-")
+            .trim('-')
+            .ifEmpty { "heading" }
+    }
+
+    private fun deduplicateId(slug: String, usedIds: MutableMap<String, Int>): String {
+        val count = usedIds[slug]
+        return if (count == null) {
+            usedIds[slug] = 1
+            slug
+        } else {
+            usedIds[slug] = count + 1
+            val newId = "$slug-$count"
+            usedIds[newId] = 1
+            newId
+        }
+    }
+
+    /**
+     * GFM：过滤禁止的原始 HTML 标签。
+     * 将 `<script>`, `<textarea>`, `<style>` 等危险标签内容替换为注释。
+     */
+    private fun filterDisallowedHtml(doc: Document) {
+        for (child in doc.children.toList()) {
+            filterDisallowedHtmlRecursive(child)
+        }
+    }
+
+    private fun filterDisallowedHtmlRecursive(node: Node) {
+        when (node) {
+            is HtmlBlock -> {
+                val filtered = filterGfmDisallowedTags(node.literal)
+                if (filtered != node.literal) {
+                    node.literal = filtered
+                }
+            }
+            is InlineHtml -> {
+                val filtered = filterGfmDisallowedTags(node.literal)
+                if (filtered != node.literal) {
+                    node.literal = filtered
+                }
+            }
+            is ContainerNode -> {
+                for (child in node.children.toList()) {
+                    filterDisallowedHtmlRecursive(child)
+                }
+            }
+            else -> {}
+        }
+    }
+
+    private fun filterGfmDisallowedTags(html: String): String {
+        return GFM_DISALLOWED_TAG_REGEX.replace(html) { match ->
+            "<!-- ${match.value} (filtered) -->"
+        }
+    }
+
+    /**
+     * 将缩写定义应用到文档中的 Text 节点。
+     * 遍历所有 Text 节点，将匹配的缩写词替换为 Abbreviation 节点。
+     */
+    private fun applyAbbreviations(doc: Document) {
+        if (doc.abbreviationDefinitions.isEmpty()) return
+        // 按长度降序排列，优先匹配较长的缩写
+        val abbrs = doc.abbreviationDefinitions.values.sortedByDescending { it.abbreviation.length }
+        applyAbbreviationsRecursive(doc, abbrs)
+    }
+
+    private fun applyAbbreviationsRecursive(node: Node, abbrs: List<AbbreviationDefinition>) {
+        if (node is ContainerNode) {
+            val children = node.children.toList()
+            for (child in children) {
+                if (child is Text) {
+                    replaceAbbreviationsInText(node, child, abbrs)
+                } else {
+                    applyAbbreviationsRecursive(child, abbrs)
+                }
+            }
+        }
+    }
+
+    private fun replaceAbbreviationsInText(
+        parent: ContainerNode,
+        textNode: Text,
+        abbrs: List<AbbreviationDefinition>
+    ) {
+        var text = textNode.literal
+        val replacements = mutableListOf<Triple<Int, Int, AbbreviationDefinition>>() // start, end, def
+
+        for (def in abbrs) {
+            val abbr = def.abbreviation
+            var searchFrom = 0
+            while (true) {
+                val idx = text.indexOf(abbr, searchFrom)
+                if (idx < 0) break
+                // 确保是词边界
+                val before = if (idx > 0) text[idx - 1] else ' '
+                val after = if (idx + abbr.length < text.length) text[idx + abbr.length] else ' '
+                if (!before.isLetterOrDigit() && !after.isLetterOrDigit()) {
+                    replacements.add(Triple(idx, idx + abbr.length, def))
+                }
+                searchFrom = idx + abbr.length
+            }
+        }
+
+        if (replacements.isEmpty()) return
+
+        // 去除重叠的替换，按位置排序
+        val sorted = replacements.sortedBy { it.first }
+        val filtered = mutableListOf<Triple<Int, Int, AbbreviationDefinition>>()
+        var lastEnd = 0
+        for (r in sorted) {
+            if (r.first >= lastEnd) {
+                filtered.add(r)
+                lastEnd = r.second
+            }
+        }
+
+        // 构建替换后的节点列表
+        val newNodes = mutableListOf<Node>()
+        var pos = 0
+        for ((start, end, def) in filtered) {
+            if (start > pos) {
+                newNodes.add(Text(text.substring(pos, start)))
+            }
+            newNodes.add(Abbreviation(abbreviation = def.abbreviation, fullText = def.fullText))
+            pos = end
+        }
+        if (pos < text.length) {
+            newNodes.add(Text(text.substring(pos)))
+        }
+
+        // 替换原 Text 节点
+        val idx = parent.children.indexOf(textNode)
+        if (idx >= 0) {
+            parent.removeChild(textNode)
+            for ((i, n) in newNodes.withIndex()) {
+                parent.insertChild(idx + i, n)
+            }
+        }
+    }
+
     companion object {
         private val LINK_REF_DEF_REGEX = Regex(
             "^\\s{0,3}\\[([^\\]]+)\\]:\\s+(?:<([^>]*)>|(\\S+))(?:\\s+(?:\"([^\"]*)\"|'([^']*)'|\\(([^)]*)\\)))?\\s*$",
             RegexOption.MULTILINE
+        )
+
+        /** 支持标题跨行的链接引用定义（标题可在下一行） */
+        private val LINK_REF_DEF_MULTILINE_TITLE_REGEX = Regex(
+            "^\\s{0,3}\\[([^\\]]+)\\]:\\s+(?:<([^>]*)>|(\\S+))\\s*\\n\\s+(?:\"([^\"]*)\"|'([^']*)'|\\(([^)]*)\\))\\s*$",
+            RegexOption.MULTILINE
+        )
+
+        /** 缩写定义：*[abbr]: Full Text */
+        private val ABBREVIATION_DEF_REGEX = Regex(
+            "^\\*\\[([^\\]]+)\\]:\\s*(.+)$",
+            RegexOption.MULTILINE
+        )
+
+        /** GFM 禁止的 HTML 标签 */
+        private val GFM_DISALLOWED_TAG_REGEX = Regex(
+            "<(title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)(\\s[^>]*)?>",
+            RegexOption.IGNORE_CASE
         )
 
         // ─── 预编译正则表达式（Tree-sitter 风格优化） ───

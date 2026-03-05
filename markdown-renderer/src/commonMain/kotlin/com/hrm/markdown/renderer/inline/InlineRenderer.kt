@@ -251,6 +251,20 @@ private fun AnnotatedString.Builder.renderInlineNode(
             append(node.literal.ifEmpty { ":${node.shortcode}:" })
         }
 
+        is Abbreviation -> {
+            // 渲染缩写：带标注的文本，hover 时显示全称
+            withStyle(theme.abbreviationStyle) {
+                append(node.abbreviation)
+            }
+        }
+
+        is KeyboardInput -> {
+            // 渲染键盘按键：等宽字体 + 背景
+            withStyle(theme.kbdStyle) {
+                append(node.literal)
+            }
+        }
+
         else -> {
             if (node is ContainerNode) {
                 renderInlineChildren(node.children, theme, inlineContents, onLinkClick)

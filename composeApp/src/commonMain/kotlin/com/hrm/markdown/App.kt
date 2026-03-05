@@ -124,6 +124,23 @@ ${'$'}${'$'}
 
 支持 Emoji 短代码：:smile: :heart: :rocket:
 
+## 键盘按键
+
+使用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 复制，<kbd>Ctrl</kbd>+<kbd>V</kbd> 粘贴。
+
+## 缩写
+
+*[HTML]: Hyper Text Markup Language
+*[CSS]: Cascading Style Sheets
+
+HTML 和 CSS 是 Web 开发的基础技术。HTML 定义页面结构，CSS 负责样式。
+
+## 目录占位符
+
+下方是 TOC 占位符（在实际渲染中会生成目录）：
+
+[TOC]
+
 ---
 
 *Powered by Markdown Renderer for Compose Multiplatform*

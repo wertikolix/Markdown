@@ -10,6 +10,9 @@ class Document : ContainerNode() {
     /** 解析过程中收集的脚注定义。 */
     val footnoteDefinitions: MutableMap<String, FootnoteDefinition> = mutableMapOf()
 
+    /** 解析过程中收集的缩写定义。 */
+    val abbreviationDefinitions: MutableMap<String, AbbreviationDefinition> = mutableMapOf()
+
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitDocument(this)
 }
 
@@ -24,6 +27,12 @@ class Heading(
     /** 来自 `{#id}` 语法的可选自定义 ID。 */
     var customId: String? = null
 
+    /** 自动生成的标题 ID（基于标题文本的 slug）。若有 customId 则优先使用。 */
+    var autoId: String? = null
+
+    /** 获取最终使用的标题 ID（customId 优先，否则 autoId）。 */
+    val id: String? get() = customId ?: autoId
+
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitHeading(this)
 }
 
@@ -33,6 +42,12 @@ class Heading(
 class SetextHeading(
     var level: Int,
 ) : ContainerNode() {
+    /** 自动生成的标题 ID（基于标题文本的 slug）。 */
+    var autoId: String? = null
+
+    /** 获取最终使用的标题 ID。 */
+    val id: String? get() = autoId
+
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitSetextHeading(this)
 }
 
@@ -225,4 +240,23 @@ class FrontMatter(
 class BlankLine : LeafNode() {
     override val literal: String get() = ""
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitBlankLine(this)
+}
+
+/**
+ * TOC 占位符：`[TOC]` 或 `[[toc]]`，渲染时自动生成目录。
+ */
+class TocPlaceholder : LeafNode() {
+    override val literal: String get() = ""
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitTocPlaceholder(this)
+}
+
+/**
+ * 缩写定义：`*[abbr]: Full Text`。
+ */
+class AbbreviationDefinition(
+    var abbreviation: String = "",
+    var fullText: String = ""
+) : LeafNode() {
+    override val literal: String get() = ""
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitAbbreviationDefinition(this)
 }
