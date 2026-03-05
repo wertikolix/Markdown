@@ -15,6 +15,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hrm.markdown.renderer.highlight.SyntaxColors
 
 /**
  * Markdown 渲染的完整主题配置。
@@ -93,6 +94,14 @@ data class MarkdownTheme(
     val subscriptStyle: SpanStyle = SpanStyle(fontSize = 12.sp),
     /** 插入文本样式 */
     val insertedTextStyle: SpanStyle = SpanStyle(textDecoration = TextDecoration.Underline),
+    /** whether syntax highlighting is enabled for code blocks */
+    val syntaxHighlightEnabled: Boolean = true,
+    /** syntax highlighting color scheme */
+    val syntaxColors: SyntaxColors = SyntaxColors(),
+    /** image corner radius */
+    val imageCornerRadius: Dp = 8.dp,
+    /** image error/placeholder text color */
+    val imageErrorColor: Color = Color(0xFF656D76),
 )
 
 @Immutable
