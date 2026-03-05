@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.mavenPublish)
 }
 
 kotlin {
@@ -39,6 +40,52 @@ kotlin {
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+    }
+}
+
+mavenPublishing {
+    publishToMavenCentral(true)
+
+    signAllPublications()
+
+    coordinates(
+        "io.github.huarangmeng",
+        "markdown-parser",
+        rootProject.property("VERSION").toString()
+    )
+
+    pom {
+        name.set("Kotlin Multiplatform Markdown Parser")
+        description.set(
+            """
+            Cross-platform Markdown parsing solution with:
+            - Full Markdown syntax support
+            - AST (Abstract Syntax Tree) generation
+            - Incremental parsing support
+            - Multi-platform support (Android/iOS/JVM/JS/WasmJS)
+        """.trimIndent()
+        )
+        inceptionYear.set("2026")
+        url.set("https://github.com/huarangmeng/Markdown")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
+                distribution.set("repo")
+            }
+        }
+        developers {
+            developer {
+                id.set("huaranmeng")
+                name.set("Kotlin Multiplatform Specialist")
+                url.set("https://github.com/huarangmeng/")
+            }
+        }
+        scm {
+            url.set("https://github.com/huarangmeng/Markdown")
+            connection.set("scm:git:git://github.com/huarangmeng/Markdown.git")
+            developerConnection.set("scm:git:ssh://git@github.com/huarangmeng/Markdown.git")
         }
     }
 }

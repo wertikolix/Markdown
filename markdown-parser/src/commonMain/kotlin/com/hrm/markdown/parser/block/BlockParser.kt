@@ -161,8 +161,6 @@ class BlockParser(
             // 仅对容器块和段落尝试开启新块
             if (lastMatched.node !is ContainerNode && lastMatched.node !is Paragraph) break
             if (lastMatched.isFenced) break // 在围栏代码块内部，不开启新块
-            if (lastMatched.node is HtmlBlock) break
-            if (lastMatched.node is IndentedCodeBlock) break
 
             // 按优先级顺序尝试各种块开启
             val newBlock = tryStartBlock(cursor, lineIdx, lastMatched)
@@ -341,7 +339,7 @@ class BlockParser(
             is ThematicBreak -> true
             is BlockQuote -> true
             is FencedCodeBlock -> true
-            is HtmlBlock -> (node as? HtmlBlock)?.htmlType?.let { it in 1..6 } ?: true
+            is HtmlBlock -> node.htmlType in 1..6
             is ListItem -> true
             is IndentedCodeBlock -> false // 不能中断段落
             is Table -> true
@@ -678,7 +676,7 @@ class BlockParser(
         if (parentList == null || !listsMatch(parentList, ordered, bulletChar, delimiter)) {
             // 如果存在不匹配的列表，先关闭它
             if (parentList != null && !listsMatch(parentList, ordered, bulletChar, delimiter)) {
-                finalizeBlock(parentOb!!)
+                finalizeBlock(parentOb)
                 openBlocks.removeAt(openBlocks.size - 1)
             }
 

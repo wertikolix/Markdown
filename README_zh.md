@@ -1,0 +1,199 @@
+# Kotlin Multiplatform Markdown 渲染库
+
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.3.10-blue.svg)](https://kotlinlang.org)
+[![Compose Multiplatform](https://img.shields.io/badge/Compose%20Multiplatform-1.10.1-brightgreen.svg)](https://www.jetbrains.com/lp/compose-multiplatform/)
+[![Android API](https://img.shields.io/badge/Android%20API-24%2B-brightgreen.svg)](https://android-arsenal.com/api?level=24)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.huarangmeng/markdown-parser.svg)](https://central.sonatype.com/search?q=io.github.huarangmeng.markdown)
+
+这是一个基于 Kotlin Multiplatform (KMP) 开发的高性能 Markdown 解析与渲染库。使用 Compose Multiplatform 在 Android、iOS、Desktop (JVM) 和 Web (Wasm/JS) 平台上实现一致的渲染效果。
+
+[English Version](./README.md)
+
+## 🌟 核心特性
+
+- **高性能解析**：基于 AST 的递归下降解析器，支持增量更新。
+- **多平台一致性**：使用 Compose Multiplatform 在 Android、iOS、Desktop (JVM) 和 Web (Wasm/JS) 平台上实现一致渲染。
+- **全面的语法覆盖**：已支持 229/243 项 Markdown 特性（94% 覆盖率），涵盖 CommonMark、GFM 及常见扩展语法。
+- **可定制主题**：完整的主题系统，30+ 可配置属性，覆盖标题、代码块、表格、引用等所有元素样式。
+- **LaTeX 数学公式**：支持行内 (`$...$`) 和块级 (`$$...$$`) 数学公式，集成 LaTeX 渲染引擎。
+- **增量解析**：感知编辑操作的解析器，仅重新解析受影响区域，适用于实时编辑场景。
+
+## 📐 已支持的 Markdown 功能（229+）
+
+<details>
+<summary><b>块级元素</b> — 标题、段落、代码块、列表、表格等</summary>
+
+- **标题**：ATX 标题 (`# ~ ######`)、Setext 标题 (`===` / `---`)、自定义标题 ID (`{#id}`)
+- **段落**：多行合并、空行分隔、延续行
+- **代码块**：围栏代码块 (`` ``` `` / `~~~`) 支持语言标识、缩进代码块（4 空格/Tab）
+- **块引用**：嵌套引用、延续行、内部块级元素
+- **列表**：无序列表 (`-`, `*`, `+`)、有序列表 (`1.`, `1)`)、任务列表 (`- [ ]` / `- [x]`)、嵌套列表、紧凑/松散区分
+- **表格 (GFM)**：列对齐 (`:---`, `:---:`, `---:`)、单元格内行内元素、管道符转义
+- **分隔线**：`---`、`***`、`___`
+- **HTML 块**：所有 7 种 CommonMark 类型
+- **链接引用定义**：完整支持各种标题格式
+</details>
+
+<details>
+<summary><b>行内元素</b> — 强调、链接、图片、代码等</summary>
+
+- **强调**：粗体 (`**`/`__`)、斜体 (`*`/`_`)、粗斜体 (`***`/`___`)、嵌套强调
+- **删除线 (GFM)**：`~~text~~`、`~text~`
+- **行内代码**：单/多反引号、空格剥离、内部不解析
+- **链接**：行内链接、引用链接（完整/折叠/简写）、自动链接（URL/邮箱/GFM 裸 URL）
+- **图片**：行内图片、引用图片、嵌套在链接内
+- **行内 HTML**：标签、注释、CDATA、处理指令
+- **转义与实体**：反斜杠转义、命名/数字 HTML 实体
+- **硬/软换行**：行尾空格、反斜杠
+</details>
+
+<details>
+<summary><b>扩展语法</b> — 数学公式、脚注、告示块等</summary>
+
+- **数学公式**：行内 `$...$`、块级 `$$...$$`
+- **脚注**：`[^label]` 引用、`[^label]: content` 定义、多行脚注、脚注内块级元素
+- **告示/提醒块**：`> [!NOTE]`、`> [!TIP]`、`> [!IMPORTANT]`、`> [!WARNING]`、`> [!CAUTION]`
+- **高亮**：`==text==`
+- **上标 / 下标**：`^text^`、`~text~`、`<sup>`、`<sub>`
+- **插入文本**：`++text++`
+- **Emoji**：`:emoji_name:` 短代码、Unicode Emoji
+- **定义列表**：术语 + `: definition` 格式
+- **Front Matter**：YAML (`---`) 和 TOML (`+++`)
+</details>
+
+## 🛠️ 使用方法
+
+在 Compose Multiplatform 项目中，直接使用 `Markdown` 组件：
+
+```kotlin
+import com.hrm.markdown.renderer.Markdown
+import com.hrm.markdown.renderer.MarkdownTheme
+
+@Composable
+fun MyScreen() {
+    Markdown(
+        markdown = """
+            # Hello World
+            
+            这是一个包含 **粗体** 和 *斜体* 的段落。
+            
+            - 列表项 1
+            - 列表项 2
+            
+            ```kotlin
+            fun hello() = println("Hello")
+            ```
+        """.trimIndent(),
+        modifier = Modifier.fillMaxSize(),
+        theme = MarkdownTheme()
+    )
+}
+```
+
+### 自定义主题
+
+```kotlin
+Markdown(
+    markdown = markdownText,
+    theme = MarkdownTheme(
+        h1Style = TextStyle(fontSize = 28.sp, fontWeight = FontWeight.Bold),
+        bodyStyle = TextStyle(fontSize = 16.sp),
+        codeBlockBackground = Color(0xFFF5F5F5),
+        // 30+ 可配置属性...
+    ),
+    onLinkClick = { url -> /* 处理链接点击 */ }
+)
+```
+
+## 📦 安装
+
+在 `gradle/libs.versions.toml` 中添加依赖：
+
+```toml
+[versions]
+markdown = "0.0.1"
+
+[libraries]
+markdown-parser = { module = "io.github.huarangmeng:markdown-parser", version.ref = "markdown" }
+markdown-renderer = { module = "io.github.huarangmeng:markdown-renderer", version.ref = "markdown" }
+```
+
+在模块的 `build.gradle.kts` 中引用：
+
+```kotlin
+dependencies {
+    implementation(libs.markdown.renderer) // 已包含 parser 作为传递依赖
+}
+```
+
+> **注意**：`markdown-renderer` 通过 `api()` 依赖了 `markdown-parser`，因此通常只需添加 renderer 依赖即可。
+
+## 🏗️ 项目结构
+
+- `:markdown-parser` — 核心解析引擎，负责将 Markdown 字符串转换为 AST（抽象语法树）。
+- `:markdown-renderer` — 渲染引擎，负责将 AST 节点映射为 Compose UI 组件。
+- `:composeApp` — 跨平台 Demo 应用程序（Android/iOS/Desktop/Web）。
+- `:androidApp` — Android Demo 应用程序。
+
+## 🚀 快速开始
+
+### 运行 Demo App
+
+- **Android**: `./gradlew :composeApp:assembleDebug`
+- **Desktop**: `./gradlew :composeApp:run`
+- **Web (Wasm)**: `./gradlew :composeApp:wasmJsBrowserDevelopmentRun`
+- **Web (JS)**: `./gradlew :composeApp:jsBrowserDevelopmentRun`
+- **iOS**: 在 Xcode 中打开 `iosApp` 目录运行。
+
+### 运行测试
+
+```bash
+# Parser 模块测试
+./gradlew :markdown-parser:allTests
+
+# Renderer 模块测试
+./gradlew :markdown-renderer:allTests
+
+# 全部测试
+./gradlew allTests
+```
+
+## 📊 路线图与功能覆盖
+
+详细的功能支持列表请参阅：[PARSER_COVERAGE_ANALYSIS.md](./markdown-parser/PARSER_COVERAGE_ANALYSIS.md)
+
+| 类别 | 覆盖率 |
+|------|--------|
+| 标题 | 88% |
+| 段落与空行 | 100% |
+| 代码块 | 93% |
+| 块引用 | 100% |
+| 列表 | 100% |
+| 表格 (GFM) | 83% |
+| 强调 | 100% |
+| 链接 | 95% |
+| 行内扩展 | 86% |
+| 增量解析 | 100% |
+| **总计** | **94%** |
+
+## 📄 开源协议
+
+本项目采用 MIT License 开源协议 - 详见 [LICENSE](LICENSE) 文件。
+
+```
+MIT License
+
+Copyright (c) 2026 huarangmeng
+
+特此免费授予任何获得本软件及相关文档文件（"软件"）副本的人不受限制地处理
+软件的权利，包括但不限于使用、复制、修改、合并、发布、分发、再许可和/或
+销售软件副本的权利，以及允许获得软件的人这样做，但须符合以下条件：
+
+上述版权声明和本许可声明应包含在软件的所有副本或主要部分中。
+
+本软件按"原样"提供，不提供任何形式的明示或暗示保证，包括但不限于对适销性、
+特定用途的适用性和非侵权性的保证。在任何情况下，作者或版权持有人均不对
+因软件或软件的使用或其他交易而产生的任何索赔、损害或其他责任承担责任，
+无论是在合同诉讼、侵权行为还是其他方面。
+```

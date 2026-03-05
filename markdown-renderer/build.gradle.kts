@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.androidLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.mavenPublish)
 }
 
 kotlin {
@@ -44,9 +45,57 @@ kotlin {
             implementation(libs.compose.material3)
             implementation(libs.compose.ui)
             implementation(libs.compose.components.resources)
+
+            implementation(libs.bundles.latex)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+        }
+    }
+}
+
+mavenPublishing {
+    publishToMavenCentral(true)
+
+    signAllPublications()
+
+    coordinates(
+        "io.github.huarangmeng",
+        "markdown-renderer",
+        rootProject.property("VERSION").toString()
+    )
+
+    pom {
+        name.set("Kotlin Multiplatform Markdown Renderer")
+        description.set(
+            """
+            Cross-platform Markdown rendering solution with:
+            - Full Markdown syntax support
+            - Compose Multiplatform UI integration
+            - Custom rendering styles
+            - Multi-platform support (Android/iOS/JVM/JS/WasmJS)
+        """.trimIndent()
+        )
+        inceptionYear.set("2026")
+        url.set("https://github.com/huarangmeng/Markdown")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
+                distribution.set("repo")
+            }
+        }
+        developers {
+            developer {
+                id.set("huaranmeng")
+                name.set("Kotlin Multiplatform Specialist")
+                url.set("https://github.com/huarangmeng/")
+            }
+        }
+        scm {
+            url.set("https://github.com/huarangmeng/Markdown")
+            connection.set("scm:git:git://github.com/huarangmeng/Markdown.git")
+            developerConnection.set("scm:git:ssh://git@github.com/huarangmeng/Markdown.git")
         }
     }
 }
