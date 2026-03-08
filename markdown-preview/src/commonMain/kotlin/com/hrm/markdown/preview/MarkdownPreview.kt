@@ -169,6 +169,13 @@ val previewCategories: List<PreviewCategory> = listOf(
         icon = "🇨🇳",
         groups = cjkPreviewGroups
     ),
+    PreviewCategory(
+        id = "flavour_config",
+        title = "方言配置",
+        description = "通过 MarkdownConfig 切换不同 Flavour（CommonMark / GFM / Extended），对比渲染差异",
+        icon = "🎛️",
+        groups = flavourConfigPreviewGroups
+    ),
 )
 
 /**

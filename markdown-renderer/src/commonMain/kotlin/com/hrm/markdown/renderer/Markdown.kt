@@ -64,6 +64,7 @@ private const val TAG_RENDER = "MarkdownRender"
  * @param markdown 原始 Markdown 文本
  * @param isStreaming 是否处于流式生成中。为 true 时启用增量解析，避免全量重解析导致的闪烁
  * @param theme 可选的自定义主题，默认跟随系统日夜间模式
+ * @param config 解析配置，控制 Markdown 方言（Flavour）和解析行为，默认使用 [MarkdownConfig.Default]（ExtendedFlavour 全功能）
  * @param scrollState 滚动状态，外部可控制滚动位置
  * @param retainStateOnChange 当 markdown 变化时是否保留旧内容直到新内容解析完成（避免闪烁）
  * @param enablePagination 是否启用分页加载，适合超长文档（> 500 段落）
@@ -76,6 +77,7 @@ fun Markdown(
     markdown: String,
     modifier: Modifier = Modifier,
     theme: MarkdownTheme = MarkdownTheme.auto(),
+    config: MarkdownConfig = MarkdownConfig.Default,
     scrollState: ScrollState = rememberScrollState(),
     isStreaming: Boolean = false,
     retainStateOnChange: Boolean = false,
@@ -85,7 +87,7 @@ fun Markdown(
     imageContent: MarkdownImageRenderer? = null,
     onLinkClick: ((String) -> Unit)? = null,
 ) {
-    val document = rememberStreamingDocument(markdown, isStreaming)
+    val document = rememberStreamingDocument(markdown, isStreaming, config)
 
     if (document == null) {
         if (isStreaming) return
@@ -117,8 +119,16 @@ fun Markdown(
 private fun rememberStreamingDocument(
     markdown: String,
     isStreaming: Boolean,
+    config: MarkdownConfig = MarkdownConfig.Default,
 ): Document? {
-    val parser = remember { MarkdownParser() }
+    val parser = remember(config) {
+        MarkdownParser(
+            flavour = config.flavour,
+            customEmojiMap = config.customEmojiMap,
+            enableAsciiEmoticons = config.enableAsciiEmoticons,
+            enableLinting = config.enableLinting,
+        )
+    }
     var lastParsedLength by remember { mutableStateOf(0) }
     var document by remember { mutableStateOf<Document?>(null) }
     var wasStreaming by remember { mutableStateOf(false) }
