@@ -197,7 +197,21 @@ class HtmlRenderer(
                 }
             }
         }
-        tag("pre")
+        // build pre-level attributes for code block enhancements
+        val preAttrs = mutableMapOf<String, String?>()
+        if (node.highlightLines.isNotEmpty()) {
+            preAttrs["data-hl-lines"] = node.highlightLines.joinToString(" ") { range ->
+                if (range.first == range.last) range.first.toString()
+                else "${range.first}-${range.last}"
+            }
+        }
+        if (node.showLineNumbers) {
+            preAttrs["data-linenums"] = "true"
+        }
+        if (node.startLineNumber != 1) {
+            preAttrs["data-startline"] = node.startLineNumber.toString()
+        }
+        tag("pre", preAttrs)
         tag("code", codeAttrs)
         sb.append(escape(node.literal))
         closeTag("code")
