@@ -68,8 +68,9 @@ class FlavourCompatibilityTest {
     }
 
     @Test
-    fun gfm_should_not_have_indented_code_block() {
-        assertFalse(GFMFlavour.blockStarters.any { it is IndentedCodeBlockStarter })
+    fun gfm_should_have_indented_code_block() {
+        // GFM 0.29 retains indented code blocks (consistent with CommonMark)
+        assertTrue(GFMFlavour.blockStarters.any { it is IndentedCodeBlockStarter })
     }
 
     @Test
