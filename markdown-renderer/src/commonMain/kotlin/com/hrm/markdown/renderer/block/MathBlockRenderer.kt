@@ -1,12 +1,16 @@
 package com.hrm.markdown.renderer.block
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -18,13 +22,6 @@ import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.markdown.parser.ast.MathBlock
 import com.hrm.markdown.renderer.LocalMarkdownTheme
 
-/**
- * 数学公式块渲染器 ($$...$$)
- * 使用 LaTeX 库渲染数学公式，通过 LatexMeasurer 预测量精确尺寸，避免多余空白。
- *
- * 公式编号（`\tag{N}`）、环境自动编号（equation/align 等）、引用（`\ref`/`\eqref`）
- * 均由 LaTeX 渲染库原生处理，无需额外的编号展示逻辑。
- */
 @Composable
 internal fun MathBlockRenderer(
     node: MathBlock,
@@ -32,18 +29,28 @@ internal fun MathBlockRenderer(
 ) {
     val theme = LocalMarkdownTheme.current
     val latex = node.literal.trim()
-    // 将 color 和 darkColor 统一设为 mathColor，
-    // 避免 Latex 组件内部 isSystemInDarkTheme() 选错颜色导致文字与背景色对比度不足
     val config = LatexConfig(
         fontSize = (theme.mathFontSize * 1.2f).sp,
         color = theme.mathColor,
         darkColor = theme.mathColor,
     )
 
-    // 使用 LatexMeasurer 精确测量公式高度，避免容器产生多余空白
     val latexMeasurer = rememberLatexMeasurer(config)
     val density = LocalDensity.current
-    val dims = latexMeasurer.measure(latex, config)
+    val dims = try {
+        latexMeasurer.measure(latex, config)
+    } catch (_: Exception) {
+        null
+    }
+
+    // pre-check if latex can be measured; if not, show raw text fallback
+    val canRender = remember(latex) {
+        try {
+            latexMeasurer.measure(latex, config) != null
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     val heightModifier = if (dims != null) {
         val heightDp = with(density) { dims.heightPx.toDp() }
@@ -57,13 +64,21 @@ internal fun MathBlockRenderer(
             .fillMaxWidth()
             .clip(RoundedCornerShape(theme.codeBlockCornerRadius))
             .background(theme.mathBlockBackground)
-            .padding(theme.codeBlockPadding),
+            .padding(theme.codeBlockPadding)
+            .horizontalScroll(rememberScrollState()),
         contentAlignment = Alignment.Center,
     ) {
-        Latex(
-            latex = latex,
-            modifier = heightModifier,
-            config = config,
-        )
+        if (canRender) {
+            Latex(
+                latex = latex,
+                modifier = heightModifier,
+                config = config,
+            )
+        } else {
+            Text(
+                text = "\$\$${latex}\$\$",
+                color = theme.mathColor,
+            )
+        }
     }
 }
