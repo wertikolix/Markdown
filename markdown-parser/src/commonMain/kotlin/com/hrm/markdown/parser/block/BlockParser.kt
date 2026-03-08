@@ -7,6 +7,7 @@ import com.hrm.markdown.parser.ast.*
 import com.hrm.markdown.parser.block.starters.BlockStarterRegistry
 import com.hrm.markdown.parser.block.starters.HeadingStarter
 import com.hrm.markdown.parser.core.CharacterUtils
+import com.hrm.markdown.parser.core.HtmlEntities
 import com.hrm.markdown.parser.core.LineCursor
 import com.hrm.markdown.parser.core.SourceText
 
@@ -134,20 +135,68 @@ class BlockParser(
             } else {
                 // 检查块是否被关闭围栏/定界符关闭
                 // （围栏代码块、数学块或前置元数据）
-                if (ob.node is FencedCodeBlock || ob.node is MathBlock || ob.node is CustomContainer) {
+                if (ob.node is FencedCodeBlock || ob.node is MathBlock || ob.node is CustomContainer
+                    || (ob.node is HtmlBlock && ob.htmlType in 1..5)) {
                     closedByFenceOrMath = true
                 }
                 break
             }
         }
 
-        // 第二阶段：关闭未匹配的块（从最深层到 matchedDepth）
+        // lazy continuation: if the deepest open block has a paragraph
+        // and unmatched blocks are only containers (block quotes, lists, list items),
+        // treat as lazy continuation per commonmark spec
+        if (!closedByFenceOrMath && matchedDepth < openBlocks.size && !cursor.restIsBlank()) {
+            val deepest = openBlocks.last()
+            if (deepest.paragraphContent != null) {
+                var onlyContainers = true
+                for (i in matchedDepth until openBlocks.size - 1) {
+                    val n = openBlocks[i].node
+                    if (n !is BlockQuote && n !is ListBlock && n !is ListItem) {
+                        onlyContainers = false; break
+                    }
+                }
+                if (onlyContainers && !wouldStartNonLazyBlock(cursor.rest())) {
+                    deepest.paragraphContent!!.append('\n').append(cursor.rest())
+                    deepest.lastLineIndex = lineIdx
+                    return
+                }
+            }
+        }
+
+        // close unmatched blocks
+        // track whether a list item with blank lines was closed
+        var closedListItemHadBlank = false
         while (openBlocks.size > matchedDepth) {
             val closed = openBlocks.removeAt(openBlocks.size - 1)
+            if (closed.node is ListItem && closed.blankLineCount > 0) {
+                closedListItemHadBlank = true
+            }
             finalizeBlock(closed)
         }
 
-        // 如果围栏块被其关闭定界符关闭，则整行已被消耗
+        // if a list item with blank lines was just closed and the remaining tip is
+        // a list block, close the list too if the current line can't start a new
+        // matching list item (per commonmark spec, insufficient indent after blank
+        // line ends the list)
+        if (closedListItemHadBlank && !closedByFenceOrMath && !cursor.restIsBlank()) {
+            val tip = openBlocks.lastOrNull()
+            if (tip != null && tip.node is ListBlock) {
+                val snap = cursor.snapshot()
+                val newBlock = if (registry != null) {
+                    registry.tryStart(cursor, lineIdx, tip)
+                } else {
+                    starters.tryStartBlock(cursor, lineIdx, tip)
+                }
+                cursor.restore(snap)
+                val startsNewItem = newBlock != null && newBlock.node is ListItem
+                if (!startsNewItem) {
+                    val closed = openBlocks.removeAt(openBlocks.size - 1)
+                    finalizeBlock(closed)
+                }
+            }
+        }
+
         if (closedByFenceOrMath) return
 
         // 第三阶段：尝试开启新块
@@ -156,9 +205,24 @@ class BlockParser(
         while (blockStarted) {
             blockStarted = false
 
-            // 处理空行
+            // handle blank lines (but fenced code blocks preserve blank lines as content)
             if (cursor.restIsBlank()) {
-                handleBlankLine(lastMatched, lineIdx)
+                if (lastMatched.isFenced || lastMatched.node is IndentedCodeBlock) {
+                    addLineToTip(lastMatched, cursor, lineIdx)
+                } else {
+                    handleBlankLine(lastMatched, lineIdx)
+                    // set blankLineAfterContent on the deepest open ListItem
+                    for (i in openBlocks.indices.reversed()) {
+                        val ob = openBlocks[i]
+                        if (ob.node is ListItem) {
+                            val li = ob.node as ListItem
+                            if (li.children.isNotEmpty() || ob.paragraphContent != null) {
+                                ob.blankLineAfterContent = true
+                            }
+                            break
+                        }
+                    }
+                }
                 lastMatched.lastLineIndex = lineIdx
                 return
             }
@@ -169,26 +233,34 @@ class BlockParser(
 
             // 按优先级顺序尝试各种块开启
             // 优先使用注册制（如果有），否则使用旧的 BlockStarters
+            val preStartSnap = cursor.snapshot()
             val newBlock = if (registry != null) {
                 registry.tryStart(cursor, lineIdx, lastMatched)
             } else {
                 starters.tryStartBlock(cursor, lineIdx, lastMatched)
             }
             if (newBlock != null) {
-                // 如果当前是段落且新块不能中断段落
                 val canInterrupt = if (registry != null) {
                     registry.canInterruptParagraph(newBlock)
                 } else {
                     starters.canInterruptParagraph(newBlock.node, cursor)
                 }
                 if (lastMatched.paragraphContent != null && !canInterrupt) {
-                    // 不开启新块，添加到段落
+                    cursor.restore(preStartSnap)
                     break
                 }
-
-                // 处理列表项的特殊逻辑：确保 ListBlock 存在
-                if (newBlock.node is ListItem) {
-                    ensureListBlock(newBlock, lineIdx)
+                if (lastMatched.paragraphContent != null && newBlock.node is ListItem) {
+                    val meta = newBlock.listItemMeta
+                    if (meta != null) {
+                        if (cursor.isAtEnd || cursor.restIsBlank()) {
+                            cursor.restore(preStartSnap)
+                            break
+                        }
+                        if (meta.ordered && meta.startNumber != 1) {
+                            cursor.restore(preStartSnap)
+                            break
+                        }
+                    }
                 }
 
                 // 如果当前是 ListBlock 且新块不是 ListItem，
@@ -239,8 +311,23 @@ class BlockParser(
                         lastMatched = newBlock
                         blockStarted = true
                         continue
-                    } else if (newBlock.node is SetextHeading || newBlock.node is Table) {
-                        // 对于 Setext 标题和表格，段落是被替换的，不仅仅是关闭
+                    } else if (newBlock.node is SetextHeading) {
+                        val rawContent = lastMatched.paragraphContent.toString()
+                        val afterLinkDefs = extractLinkReferenceDefs(rawContent)
+                        if (afterLinkDefs.isBlank()) {
+                            // All paragraph content was link ref defs; setext underline
+                            // is not a heading, treat it as paragraph text
+                            paragraphParent?.removeChild(paragraphNode)
+                            openBlocks.removeAt(openBlocks.size - 1)
+                            lastMatched = openBlocks.last()
+                            cursor.restore(preStartSnap)
+                            break
+                        }
+                        // Update content to only include the non-link-ref-def part
+                        newBlock.contentLines.clear()
+                        newBlock.contentLines.addAll(afterLinkDefs.split('\n'))
+                        paragraphParent?.removeChild(paragraphNode)
+                    } else if (newBlock.node is Table) {
                         paragraphParent?.removeChild(paragraphNode)
                     } else {
                         finalizeBlock(lastMatched)
@@ -248,10 +335,14 @@ class BlockParser(
                     openBlocks.removeAt(openBlocks.size - 1)
                 }
 
+                // ensure list block exists (after paragraph is closed)
+                if (newBlock.node is ListItem) {
+                    ensureListBlock(newBlock, lineIdx)
+                }
+
                 val parent = if (openBlocks.last().node is ContainerNode) {
                     openBlocks.last().node as ContainerNode
                 } else {
-                    // 查找最近的容器
                     var idx = openBlocks.size - 1
                     while (idx >= 0 && openBlocks[idx].node !is ContainerNode) idx--
                     if (idx >= 0) openBlocks[idx].node as ContainerNode else document
@@ -312,9 +403,10 @@ class BlockParser(
                 val snap = cursor.snapshot()
                 val spaces = cursor.advanceSpaces(3)
                 if (!cursor.isAtEnd && cursor.peek() == '>') {
-                    cursor.advance() // 跳过 '>'
-                    if (!cursor.isAtEnd && cursor.peek() == ' ') {
-                        cursor.advance() // 跳过可选空格
+                    cursor.advance() // skip '>'
+                    // skip optional space (or one column of a tab)
+                    if (!cursor.isAtEnd && (cursor.peek() == ' ' || cursor.peek() == '\t')) {
+                        cursor.advanceSpaces(1)
                     }
                     true
                 } else {
@@ -327,13 +419,24 @@ class BlockParser(
                     ob.blankLineCount++
                     true
                 } else {
-                    val snap = cursor.snapshot()
-                    val indent = cursor.advanceSpaces()
-                    if (indent >= node.contentIndent) {
-                        true
-                    } else {
-                        cursor.restore(snap)
+                    // per commonmark spec, an empty list item (no content on marker line)
+                    // followed by a blank line (actual blank source line, not just marker
+                    // line with whitespace) cannot contain further blocks.
+                    // blankLineCount > 1 means there was at least one actual blank source
+                    // line beyond the initial marker line's blank content area.
+                    if (ob.blankLineCount > 1 && node.children.isEmpty() && ob.paragraphContent == null) {
                         false
+                    } else {
+                        val snap = cursor.snapshot()
+                        val indent = cursor.advanceSpaces(node.contentIndent)
+                        if (indent >= node.contentIndent) {
+                            if (ob.blankLineAfterContent) node.containsBlankLine = true
+                            ob.blankLineAfterContent = false
+                            true
+                        } else {
+                            cursor.restore(snap)
+                            false
+                        }
                     }
                 }
             }
@@ -356,10 +459,11 @@ class BlockParser(
             }
             is IndentedCodeBlock -> {
                 if (cursor.restIsBlank()) {
+                    cursor.advanceSpaces(4)
                     true
                 } else {
                     val snap = cursor.snapshot()
-                    val indent = cursor.advanceSpaces()
+                    val indent = cursor.advanceSpaces(4)
                     if (indent >= 4) {
                         true
                     } else {
@@ -369,13 +473,14 @@ class BlockParser(
                 }
             }
             is HtmlBlock -> {
-                // 类型 1-5：检查结束条件，匹配则关闭块
-                val isEnd = checkHtmlBlockEnd(cursor.rest(), ob.htmlType)
+                val line = cursor.rest()
+                val isEnd = checkHtmlBlockEnd(line, ob.htmlType)
                 if (isEnd && ob.htmlType in 1..5) {
+                    // add the closing line before finalizing
+                    ob.contentLines.add(line)
                     ob.lastLineIndex = currentLine
                     return false
                 }
-                // 类型 6-7：空行时由 handleBlankLine 关闭
                 true
             }
             is ListBlock -> true // 列表块始终继续
@@ -491,11 +596,47 @@ class BlockParser(
     }
 
     private fun isClosingFence(line: String, fenceChar: Char, openLength: Int): Boolean {
-        val trimmed = line.trim()
+        val trimmed = line.trimEnd()
         if (trimmed.isEmpty()) return false
         if (trimmed[0] != fenceChar) return false
         if (!trimmed.all { it == fenceChar }) return false
         return trimmed.length >= openLength
+    }
+
+    private fun wouldStartNonLazyBlock(line: String): Boolean {
+        // count leading spaces (0-3 allowed for most block starts; 4+ is indented code
+        // which cannot interrupt a paragraph, so not a lazy-breaking block)
+        var indent = 0
+        var idx = 0
+        while (idx < line.length && (line[idx] == ' ' || line[idx] == '\t')) {
+            if (line[idx] == '\t') indent += (4 - indent % 4) else indent++
+            idx++
+        }
+        val s = if (idx < line.length) line.substring(idx) else ""
+        if (s.isEmpty()) return false
+        // 4+ spaces of indent means indented code, which cannot interrupt a paragraph
+        if (indent >= 4) return false
+        if (s.startsWith('>')) return true
+        if (s.startsWith('#') && s.length > 1 && (s[1] == ' ' || s[1] == '\t' || s[1] == '#')) return true
+        val tbChar = s[0]
+        if ((tbChar == '-' || tbChar == '*' || tbChar == '_') && s.length >= 3) {
+            val stripped = s.replace(" ", "").replace("\t", "")
+            if (stripped.length >= 3 && stripped.all { it == tbChar }) return true
+        }
+        if (s.startsWith("```") || s.startsWith("~~~")) return true
+        if (s.startsWith('<') && s.length > 1) return true
+        // list item markers: bullet (- * +) followed by space/tab/eol
+        if ((s[0] == '-' || s[0] == '*' || s[0] == '+') &&
+            (s.length == 1 || s[1] == ' ' || s[1] == '\t')) return true
+        // ordered list markers: digits followed by . or ) then space/tab/eol
+        if (s[0] in '0'..'9') {
+            var i = 1
+            while (i < s.length && i < 10 && s[i] in '0'..'9') i++
+            if (i < s.length && (s[i] == '.' || s[i] == ')')) {
+                if (i + 1 >= s.length || s[i + 1] == ' ' || s[i + 1] == '\t') return true
+            }
+        }
+        return false
     }
 
     private fun checkHtmlBlockEnd(line: String, htmlType: Int): Boolean {
@@ -526,15 +667,20 @@ class BlockParser(
 
         when (val node = tip.node) {
             is FencedCodeBlock -> {
-                tip.contentLines.add(lineContent)
+                // skip the opening fence line itself (content starts on the next line)
+                if (lineIdx > tip.contentStartLine) {
+                    tip.contentLines.add(lineContent)
+                }
             }
             is IndentedCodeBlock -> {
                 tip.contentLines.add(lineContent)
             }
             is HtmlBlock -> {
-                tip.contentLines.add(cursor.rest())
-                // 检查结束条件
-                if (checkHtmlBlockEnd(source.lineContent(lineIdx), tip.htmlType)) {
+                // first line content is already added by HtmlBlockStarter; use cursor.rest() for subsequent lines
+                if (lineIdx > tip.contentStartLine) {
+                    tip.contentLines.add(cursor.rest())
+                }
+                if (checkHtmlBlockEnd(cursor.rest(), tip.htmlType)) {
                     finalizeBlock(tip)
                     openBlocks.removeAt(openBlocks.size - 1)
                 }
@@ -685,7 +831,10 @@ class BlockParser(
         val node = ob.node
         when (node) {
             is Paragraph -> {
-                val content = ob.paragraphContent?.toString()?.trim() ?: ""
+                // strip leading spaces from each line per commonmark spec
+                val content = ob.paragraphContent?.toString()
+                    ?.lines()?.joinToString("\n") { it.trimStart() }
+                    ?.trim() ?: ""
                 if (content.isEmpty()) {
                     // 移除空段落
                     (node.parent as? ContainerNode)?.removeChild(node)
@@ -715,17 +864,33 @@ class BlockParser(
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is Heading -> {
+                node.rawContent = ob.contentLines.joinToString("\n")
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is SetextHeading -> {
+                // store the parsed content (from paragraph), trimming leading/trailing whitespace
+                // per line just like paragraph finalization does
+                if (ob.contentLines.isNotEmpty()) {
+                    node.rawContent = ob.contentLines.joinToString("\n") { it.trimStart().trimEnd() }
+                }
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is FencedCodeBlock -> {
-                node.literal = ob.contentLines.joinToString("\n")
-                if (node.literal.endsWith('\n')) {
-                    // 尾部换行符没问题
-                } else if (ob.contentLines.isNotEmpty()) {
-                    node.literal += "\n"
+                val lines = ob.contentLines
+                if (lines.size == 1 && lines[0].isEmpty()) {
+                    node.literal = ""
+                } else if (lines.isNotEmpty()) {
+                    if (ob.isFenced) {
+                        // unclosed fence: use joinToString which handles trailing empty line from
+                        // source text splitting naturally (no extra trailing newline)
+                        node.literal = lines.joinToString("\n")
+                        if (!node.literal.endsWith('\n') && lines.isNotEmpty()) {
+                            node.literal += "\n"
+                        }
+                    } else {
+                        // properly closed fence: each content line gets its own trailing newline
+                        node.literal = lines.joinToString("") { it + "\n" }
+                    }
                 }
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
@@ -782,12 +947,18 @@ class BlockParser(
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is ListBlock -> {
+                // compute endLine from children for accurate lineRange
+                val childEnd = node.children.maxOfOrNull { it.lineRange.endLine } ?: (ob.lastLineIndex + 1)
+                val endLine = maxOf(ob.lastLineIndex + 1, childEnd)
+                node.lineRange = LineRange(ob.contentStartLine, endLine)
                 // 判断紧凑 vs 松散
                 node.tight = isListTight(node)
-                node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is ListItem -> {
-                node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
+                // compute endLine from children for accurate lineRange
+                val childEnd = node.children.maxOfOrNull { it.lineRange.endLine } ?: (ob.lastLineIndex + 1)
+                val endLine = maxOf(ob.lastLineIndex + 1, childEnd)
+                node.lineRange = LineRange(ob.contentStartLine, endLine)
             }
             is FootnoteDefinition -> {
                 document.footnoteDefinitions[node.label] = node
@@ -863,23 +1034,46 @@ class BlockParser(
     }
 
     private fun isListTight(list: ListBlock): Boolean {
-        for (item in list.children) {
-            if (item !is ListItem) continue
-            // 如果任何列表项的子节点之间有空行则为松散列表
+        val items = list.children.filterIsInstance<ListItem>()
+        val lastContentLine = source.lineCount - 1
+        fun isBlankContentLine(line: Int): Boolean {
+            if (line < 0 || line >= source.lineCount) return false
+            if (line == lastContentLine && source.lineContent(line).isEmpty()) return false
+            return source.lineContent(line).isBlank()
+        }
+        for (item in items) {
+            if (item.containsBlankLine) return false
             val children = item.children
-            for (i in 0 until children.size - 1) {
-                val thisEnd = children[i].lineRange.endLine
-                val nextStart = children[i + 1].lineRange.startLine
-                if (nextStart > thisEnd) return false
+            if (children.size >= 2) {
+                // check for blank lines between consecutive direct children of this item
+                for (c in 0 until children.size - 1) {
+                    val gapStart = children[c].lineRange.endLine
+                    val gapEnd = children[c + 1].lineRange.startLine
+                    for (line in gapStart until gapEnd) {
+                        if (isBlankContentLine(line)) return false
+                    }
+                }
+            }
+            if (children.isNotEmpty()) {
+                // check for trailing blank lines within this item (after last child)
+                val lastChildEnd = children.last().lineRange.endLine
+                val itemEnd = item.lineRange.endLine
+                for (line in lastChildEnd until itemEnd) {
+                    if (isBlankContentLine(line)) return false
+                }
+            } else {
+                // empty item: check for blank lines within its range
+                for (line in item.lineRange.startLine + 1 until item.lineRange.endLine) {
+                    if (isBlankContentLine(line)) return false
+                }
             }
         }
-        // 同时检查列表项之间
-        val items = list.children
+        // check for blank lines between consecutive list items
         for (i in 0 until items.size - 1) {
-            if (items[i] is ListItem && items[i + 1] is ListItem) {
-                val thisEnd = items[i].lineRange.endLine
-                val nextStart = items[i + 1].lineRange.startLine
-                if (nextStart > thisEnd) return false
+            val gapStart = items[i].lineRange.endLine
+            val gapEnd = items[i + 1].lineRange.startLine
+            for (line in gapStart until gapEnd) {
+                if (isBlankContentLine(line)) return false
             }
         }
         return true
@@ -904,18 +1098,23 @@ class BlockParser(
             }
 
             val label = CharacterUtils.normalizeLinkLabel(effectiveMatch.groupValues[1])
-            // destination 可能在 group 2（尖括号包裹）或 group 3（裸 URL）
-            val destination = effectiveMatch.groupValues[2].ifEmpty { effectiveMatch.groupValues[3] }.let {
+            val rawDest = effectiveMatch.groupValues[2].ifEmpty { effectiveMatch.groupValues[3] }.let {
                 if (it.startsWith('<') && it.endsWith('>')) it.drop(1).dropLast(1) else it
             }
-            // title 可能在 group 4（双引号）、5（单引号）或 6（括号）
-            val title = effectiveMatch.groupValues[4].ifEmpty {
+            val destination = CharacterUtils.percentEncodeUrl(
+                HtmlEntities.replaceAll(resolveBackslashEscapes(rawDest))
+            )
+            val rawTitle = effectiveMatch.groupValues[4].ifEmpty {
                 effectiveMatch.groupValues[5].ifEmpty {
                     effectiveMatch.groupValues[6].ifEmpty { null }
                 }
             }
+            val title = rawTitle?.let { HtmlEntities.replaceAll(resolveBackslashEscapes(it)) }
 
-            if (label.isNotEmpty() && !document.linkDefinitions.containsKey(label)) {
+            // blank labels are not valid link reference definitions
+            if (label.isEmpty()) break
+
+            if (!document.linkDefinitions.containsKey(label)) {
                 val def = LinkReferenceDefinition(
                     label = label,
                     destination = destination,
@@ -952,6 +1151,21 @@ class BlockParser(
             remaining = remaining.substring(match.range.last + 1).trimStart('\n')
         }
         return remaining
+    }
+
+    private fun resolveBackslashEscapes(s: String): String {
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            if (s[i] == '\\' && i + 1 < s.length && CharacterUtils.isAsciiPunctuation(s[i + 1])) {
+                sb.append(s[i + 1])
+                i += 2
+            } else {
+                sb.append(s[i])
+                i++
+            }
+        }
+        return sb.toString()
     }
 
     private fun findNearestContainer(): ContainerNode {
@@ -1031,7 +1245,9 @@ class BlockParser(
         if (lr.lineCount <= 0) return ""
         return when (node) {
             is Heading -> {
-                // 对于 ATX 标题，内容已在解析时捕获
+                if (node.rawContent != null) {
+                    return node.rawContent!!.trim()
+                }
                 val line = source.lineContent(lr.startLine)
                 val stripped = line.trimStart()
                 val hashes = stripped.takeWhile { it == '#' }
@@ -1040,7 +1256,6 @@ class BlockParser(
                     if (content.startsWith(' ') || content.startsWith('\t')) {
                         content = content.drop(1)
                     }
-                    // 去除尾部 #
                     content = content.trimEnd()
                     val customId = HeadingStarter.extractCustomId(content)
                     if (customId != null) {
@@ -1052,14 +1267,19 @@ class BlockParser(
                             content = t.trimEnd()
                         }
                     }
-                    content
+                    content.trimStart()
                 } else {
                     line
                 }
             }
             is SetextHeading -> {
-                // 内容为除最后一行（下划线）外的所有行
-                val lines = (lr.startLine until lr.endLine - 1).map { source.lineContent(it) }
+                // use parsed content if available (strips block-level markers like list prefixes)
+                if (node.rawContent != null) {
+                    return node.rawContent!!
+                }
+                val lines = (lr.startLine until lr.endLine - 1).map {
+                    source.lineContent(it).trimStart().trimEnd()
+                }
                 lines.joinToString("\n")
             }
             is Paragraph -> {
@@ -1157,14 +1377,17 @@ class BlockParser(
     }
 
     companion object {
+        // link label: no unescaped [ or ], but allow backslash escapes like \] \[ \\
+        private val LINK_LABEL_PATTERN = "((?:[^\\[\\]\\\\]|\\\\.)+)"
+
         private val LINK_REF_DEF_REGEX = Regex(
-            "^\\s{0,3}\\[([^\\]]+)\\]:\\s+(?:<([^>]*)>|(\\S+))(?:\\s+(?:\"([^\"]*)\"|'([^']*)'|\\(([^)]*)\\)))?\\s*$",
+            "^\\s{0,3}\\[${LINK_LABEL_PATTERN}\\]:\\s*(?:<([^>]*)>|([^\\s<>][^\\s]*))(?:\\s+(?:\"((?:[^\"]|\\\\\")*)\"|'([^']*)'|\\(([^)]*)\\)))?\\s*$",
             RegexOption.MULTILINE
         )
 
         /** 支持标题跨行的链接引用定义（标题可在下一行） */
         private val LINK_REF_DEF_MULTILINE_TITLE_REGEX = Regex(
-            "^\\s{0,3}\\[([^\\]]+)\\]:\\s+(?:<([^>]*)>|(\\S+))\\s*\\n\\s+(?:\"([^\"]*)\"|'([^']*)'|\\(([^)]*)\\))\\s*$",
+            "^\\s{0,3}\\[${LINK_LABEL_PATTERN}\\]:\\s*(?:<([^>]*)>|([^\\s<>][^\\s]*))\\s*\\n\\s+(?:\"((?:[^\"]|\\\\\")*)\"|'([^']*)'|\\(([^)]*)\\))\\s*$",
             RegexOption.MULTILINE
         )
 

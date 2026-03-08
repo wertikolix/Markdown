@@ -29,6 +29,9 @@ class Heading(
     /** 来自 `{#id}` 语法的可选自定义 ID。 */
     var customId: String? = null
 
+    /** 解析阶段捕获的原始内容（已去除块级标记如块引用前缀），供行内解析使用。 */
+    var rawContent: String? = null
+
     /** 自动生成的标题 ID（基于标题文本的 slug）。若有 customId 则优先使用。 */
     var autoId: String? = null
 
@@ -49,6 +52,9 @@ class SetextHeading(
 ) : ContainerNode() {
     /** 自动生成的标题 ID（基于标题文本的 slug）。 */
     var autoId: String? = null
+
+    /** parsed heading content (stripped of block-level markers like list prefixes) */
+    var rawContent: String? = null
 
     /** 获取最终使用的标题 ID。 */
     val id: String? get() = autoId
@@ -142,6 +148,8 @@ class ListItem(
     /** 用于任务列表。 */
     var taskListItem: Boolean = false
     var checked: Boolean = false
+    /** tracks whether a blank line was seen between block children within this item */
+    var containsBlankLine: Boolean = false
 
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitListItem(this)
 }

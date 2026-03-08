@@ -2,6 +2,8 @@ package com.hrm.markdown.parser.block
 
 import com.hrm.markdown.parser.LineRange
 import com.hrm.markdown.parser.ast.*
+import com.hrm.markdown.parser.core.CharacterUtils
+import com.hrm.markdown.parser.core.HtmlEntities
 import com.hrm.markdown.parser.core.LineCursor
 import com.hrm.markdown.parser.core.SourceText
 
@@ -223,7 +225,8 @@ internal class BlockStarters(
         // 消耗掉 info string 剩余部分，避免被 addLineToTip 当作代码内容
         cursor.advance(cursor.remaining)
 
-        val language = info.split(INFO_LANG_SPLIT_REGEX).firstOrNull()?.trim() ?: ""
+        val rawLang = info.split(INFO_LANG_SPLIT_REGEX).firstOrNull()?.trim() ?: ""
+        val language = HtmlEntities.replaceAll(resolveBackslashEscapes(rawLang))
 
         val block = FencedCodeBlock(
             info = info,
@@ -310,12 +313,27 @@ internal class BlockStarters(
         if (!cursor.isAtEnd && cursor.peek() != ' ' && cursor.peek() != '\t') return null
 
         // 消耗标记后的一个空格（或使用行尾标记）
-        val contentIndent = indent + markerWidth + if (!cursor.isAtEnd) {
-            // 消耗标记后的空格（1 到 4 个用于内容缩进）
-            val postMarker = cursor.advanceSpaces(4)
-            if (postMarker == 0) 1 else postMarker
+        val contentIndent: Int
+        if (cursor.isAtEnd) {
+            contentIndent = indent + markerWidth + 1
         } else {
-            1
+            val preSpaceSnap = cursor.snapshot()
+            val postMarker = cursor.advanceSpaces(4)
+            if (cursor.isAtEnd || cursor.restIsBlank()) {
+                // blank line after marker: use minimum indent
+                cursor.restore(preSpaceSnap)
+                if (!cursor.isAtEnd && (cursor.peek() == ' ' || cursor.peek() == '\t')) {
+                    cursor.advance()
+                }
+                contentIndent = indent + markerWidth + 1
+            } else if (postMarker == 4 && !cursor.isAtEnd && (cursor.peek() == ' ' || cursor.peek() == '\t')) {
+                // more than 4 spaces after marker -> indented code block; use minimum indent
+                cursor.restore(preSpaceSnap)
+                cursor.advance()
+                contentIndent = indent + markerWidth + 1
+            } else {
+                contentIndent = indent + markerWidth + if (postMarker == 0) 1 else postMarker
+            }
         }
 
         // 检查任务列表
@@ -579,8 +597,7 @@ internal class BlockStarters(
         // 类型 6：已知块级标签
         val tagMatch = HTML_TYPE6_TAG_REGEX.find(line)
         if (tagMatch != null && tagMatch.groupValues[1].lowercase() in BLOCK_TAGS) return 6
-        // 类型 7：其他标签（开标签或闭标签）
-        if (HTML_TYPE7_REGEX.containsMatchIn(line)) return 7
+        if (HTML_TYPE7_OPEN_REGEX.containsMatchIn(line) || HTML_TYPE7_CLOSE_REGEX.containsMatchIn(line)) return 7
         return null
     }
 
@@ -628,8 +645,22 @@ internal class BlockStarters(
         return ContainerInfo(type, title, cssClasses, cssId)
     }
 
+    private fun resolveBackslashEscapes(s: String): String {
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            if (s[i] == '\\' && i + 1 < s.length && CharacterUtils.isAsciiPunctuation(s[i + 1])) {
+                sb.append(s[i + 1])
+                i += 2
+            } else {
+                sb.append(s[i])
+                i++
+            }
+        }
+        return sb.toString()
+    }
+
     companion object {
-        /** 自定义标题 ID：{#id} */
         internal val CUSTOM_ID_REGEX = Regex("\\{#([^\\}]+)\\}\\s*$")
         internal val CUSTOM_ID_STRIP_REGEX = Regex("\\s*\\{#[^\\}]+\\}\\s*$")
 
@@ -649,7 +680,13 @@ internal class BlockStarters(
         private val HTML_TYPE1_REGEX = Regex("^<(script|pre|style|textarea)(\\s|>|$)", RegexOption.IGNORE_CASE)
         private val HTML_TYPE4_REGEX = Regex("^<![A-Z]")
         private val HTML_TYPE6_TAG_REGEX = Regex("^</?([a-zA-Z][a-zA-Z0-9-]*)(\\s|/?>|$)")
-        private val HTML_TYPE7_REGEX = Regex("^</?[a-zA-Z][a-zA-Z0-9-]*([\\s/]|>)")
+        // type 7: complete open tag or closing tag, followed by only optional whitespace
+        private val HTML_TYPE7_OPEN_REGEX = Regex(
+            """^<[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*/?>[ \t]*$"""
+        )
+        private val HTML_TYPE7_CLOSE_REGEX = Regex(
+            """^</[a-zA-Z][a-zA-Z0-9-]*\s*>[ \t]*$"""
+        )
 
         /** HTML 块类型 6 的已知块级标签集合 */
         private val BLOCK_TAGS = setOf(

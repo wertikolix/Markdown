@@ -17,11 +17,13 @@ class InlineParser(
     private val customEmojiMap: Map<String, String> = emptyMap(),
     /** 是否启用 ASCII 表情自动转换 */
     private val enableAsciiEmoticons: Boolean = false,
+    private val enableGfmAutolinks: Boolean = true,
+    private val enableExtendedInline: Boolean = true,
 ) : BlockParser.InlineParserInterface {
 
     override fun parseInlines(content: String, parent: ContainerNode) {
         if (content.isEmpty()) return
-        val parser = InlineParserInstance(content, document, customEmojiMap, enableAsciiEmoticons)
+        val parser = InlineParserInstance(content, document, customEmojiMap, enableAsciiEmoticons, enableGfmAutolinks, enableExtendedInline)
         val nodes = parser.parse()
         for (node in nodes) {
             parent.appendChild(node)
@@ -35,7 +37,9 @@ class InlineParser(
             """<(?:""" +
             """[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z_:][a-zA-Z0-9_.:-]*(?:\s*=\s*(?:[^\s"'=<>`]+|'[^']*'|"[^"]*"))?)*\s*/?>""" +
             """|/[a-zA-Z][a-zA-Z0-9-]*\s*>""" +
-            """|!--[\s\S]*?-->""" +
+            """|!-->""" +
+            """|!--->""" +
+            """|!--(?!>)(?!->)[\s\S]*?-->""" +
             """|\?[\s\S]*?\?>""" +
             """|![A-Z]+\s+[\s\S]*?>""" +
             """|!\[CDATA\[[\s\S]*?\]\]>""" +
@@ -154,6 +158,8 @@ private class InlineParserInstance(
     private val document: Document,
     private val customEmojiMap: Map<String, String> = emptyMap(),
     private val enableAsciiEmoticons: Boolean = false,
+    private val enableGfmAutolinks: Boolean = true,
+    private val enableExtendedInline: Boolean = true,
 ) {
     // 链表包装 AST 节点
     private class LLNode(var astNode: Node) {
@@ -179,7 +185,8 @@ private class InlineParserInstance(
         val isImage: Boolean,
         var active: Boolean,
         val prevDelim: DelimEntry?, // delimiter stack bottom
-        var prev: BracketEntry?
+        var prev: BracketEntry?,
+        val contentStartPos: Int = 0 // position in input right after the opening [
     )
 
     // 链表头/尾
@@ -211,12 +218,12 @@ private class InlineParserInstance(
                 }
                 c == ']' -> appendCloseBracket()
                 c == '*' || c == '_' -> appendDelimiterRun(c)
-                c == '~' -> appendTildeRun()
-                c == '=' && scanner.peek(1) == '=' -> appendPairedDelim('=', 2)
-                c == '+' && scanner.peek(1) == '+' -> appendPairedDelim('+', 2)
-                c == '^' -> appendPairedDelim('^', 1)
-                c == '$' -> appendDollar()
-                c == ':' -> appendPossibleEmoji()
+                c == '~' && enableExtendedInline -> appendTildeRun()
+                c == '=' && scanner.peek(1) == '=' && enableExtendedInline -> appendPairedDelim('=', 2)
+                c == '+' && scanner.peek(1) == '+' && enableExtendedInline -> appendPairedDelim('+', 2)
+                c == '^' && enableExtendedInline -> appendPairedDelim('^', 1)
+                c == '$' && enableExtendedInline -> appendDollar()
+                c == ':' && enableExtendedInline -> appendPossibleEmoji()
                 c == '\n' -> appendLineBreak()
                 else -> appendText()
             }
@@ -299,6 +306,10 @@ private class InlineParserInstance(
         if (next == '\n') {
             scanner.advance()
             appendLL(HardLineBreak())
+            // skip leading spaces on the next line
+            while (!scanner.isAtEnd && scanner.peek() == ' ') {
+                scanner.advance()
+            }
         } else if (CharacterUtils.isAsciiPunctuation(next)) {
             scanner.advance()
             appendLL(EscapedChar(next.toString()))
@@ -355,7 +366,8 @@ private class InlineParserInstance(
                 val autolinkMatch = InlineParser.AUTOLINK_REGEX.find(input, pos)
                 if (autolinkMatch != null && autolinkMatch.range.first == pos) {
                     scanner.pos = autolinkMatch.range.last + 1
-                    appendLL(Autolink(destination = CharacterUtils.percentEncodeUrl(autolinkMatch.groupValues[1]), isEmail = false))
+                    val raw = autolinkMatch.groupValues[1]
+                    appendLL(Autolink(destination = CharacterUtils.percentEncodeUrl(raw), isEmail = false, rawText = raw))
                     return
                 }
 
@@ -412,6 +424,7 @@ private class InlineParserInstance(
 
     private fun appendOpenBracket(isImage: Boolean) {
         scanner.advance() // skip '['
+        val contentStart = scanner.pos // position right after [
         val text = if (isImage) "![" else "["
         val ll = appendLL(Text(text))
         bracketTop = BracketEntry(
@@ -419,7 +432,8 @@ private class InlineParserInstance(
             isImage = isImage,
             active = true,
             prevDelim = delimTail,
-            prev = bracketTop
+            prev = bracketTop,
+            contentStartPos = contentStart
         )
     }
 
@@ -790,10 +804,19 @@ private class InlineParserInstance(
     private fun appendLineBreak() {
         val pos = scanner.pos
         scanner.advance()
+        // strip trailing spaces from the preceding text node
+        val prevText = llTail?.astNode as? Text
+        if (prevText != null) {
+            prevText.literal = prevText.literal.trimEnd(' ')
+        }
         if (pos >= 2 && input[pos - 1] == ' ' && input[pos - 2] == ' ') {
             appendLL(HardLineBreak())
         } else {
             appendLL(SoftLineBreak())
+        }
+        // skip leading spaces on the next line
+        while (!scanner.isAtEnd && scanner.peek() == ' ') {
+            scanner.advance()
         }
     }
 
@@ -802,12 +825,15 @@ private class InlineParserInstance(
         while (!scanner.isAtEnd) {
             val c = scanner.peek()
             if (c == '\\' || c == '`' || c == '<' || c == '&' || c == '[' || c == ']' ||
-                c == '*' || c == '_' || c == '~' || c == '\n' || c == '$' || c == ':' || c == '^') {
+                c == '*' || c == '_' || c == '\n') {
+                break
+            }
+            if (enableExtendedInline && (c == '~' || c == '$' || c == ':' || c == '^')) {
                 break
             }
             if (c == '!' && scanner.peek(1) == '[') break
-            if (c == '=' && scanner.peek(1) == '=') break
-            if (c == '+' && scanner.peek(1) == '+') break
+            if (enableExtendedInline && c == '=' && scanner.peek(1) == '=') break
+            if (enableExtendedInline && c == '+' && scanner.peek(1) == '+') break
 
             // ASCII 表情检测（非 : 开头的，如 ;) B) XD 等）
             if (enableAsciiEmoticons && (c == ';' || c == 'B' || c == 'X' || c == 'x' || c == '8' || c == 'O' || c == 'o')) {
@@ -833,8 +859,8 @@ private class InlineParserInstance(
                 if (matched) return
             }
 
-            // GFM 自动链接检测（在任意位置触发，不仅仅是文本开头）
-            if (c == 'h' || c == 'H' || c == 'w' || c == 'W') {
+            // GFM bare URL autolink detection
+            if (enableGfmAutolinks && (c == 'h' || c == 'H' || c == 'w' || c == 'W')) {
                 val remaining = input.substring(scanner.pos)
                 val urlMatch = InlineParser.GFM_URL_REGEX.find(remaining)
                 if (urlMatch != null && urlMatch.range.first == 0) {
@@ -1037,10 +1063,21 @@ private class InlineParserInstance(
         val height: Int? = null,
     )
 
-    /**
-     * 解析链接尾部 `(url "title")` 或 `(url =WxH "title")`。
-     * 当 [isImage] 为 true 时，还会尝试解析 `=WxH` 尺寸后缀。
-     */
+    private fun resolveBackslashEscapes(s: String): String {
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            if (s[i] == '\\' && i + 1 < s.length && CharacterUtils.isAsciiPunctuation(s[i + 1])) {
+                sb.append(s[i + 1])
+                i += 2
+            } else {
+                sb.append(s[i])
+                i++
+            }
+        }
+        return sb.toString()
+    }
+
     private fun tryParseLinkTail(isImage: Boolean = false): LinkTailResult? {
         val pos = scanner.pos
         if (pos >= input.length || input[pos] != '(') return null
@@ -1084,9 +1121,10 @@ private class InlineParserInstance(
 
         if (i >= input.length || input[i] != ')') return null
         scanner.pos = i + 1
-        // 仅对非尖括号包裹的 URL 进行百分号编码
-        val finalDest = if (!isAngleBracket) CharacterUtils.percentEncodeUrl(dest) else dest
-        return LinkTailResult(finalDest, title, imgWidth, imgHeight)
+        val resolvedDest = HtmlEntities.replaceAll(dest)
+        val finalDest = CharacterUtils.percentEncodeUrl(resolvedDest)
+        val resolvedTitle = title?.let { HtmlEntities.replaceAll(it) }
+        return LinkTailResult(finalDest, resolvedTitle, imgWidth, imgHeight)
     }
 
     /**
@@ -1233,8 +1271,8 @@ private class InlineParserInstance(
             i++
             val sb = StringBuilder()
             while (i < input.length && input[i] != '>') {
-                if (input[i] == '<') return null
-                if (input[i] == '\\' && i + 1 < input.length) {
+                if (input[i] == '<' || input[i] == '\n') return null
+                if (input[i] == '\\' && i + 1 < input.length && CharacterUtils.isAsciiPunctuation(input[i + 1])) {
                     i++
                     sb.append(input[i])
                 } else {
@@ -1256,7 +1294,10 @@ private class InlineParserInstance(
                 c == ')' && parenDepth == 0 -> break
                 c == '(' -> { parenDepth++; sb.append(c) }
                 c == ')' -> { parenDepth--; sb.append(c) }
-                c == '\\' && i + 1 < input.length -> { i++; sb.append(input[i]) }
+                c == '\\' && i + 1 < input.length && CharacterUtils.isAsciiPunctuation(input[i + 1]) -> {
+                    i++; sb.append(input[i])
+                }
+                c == '\\' -> sb.append(c)
                 c.code < 0x20 -> break
                 else -> sb.append(c)
             }
@@ -1275,7 +1316,7 @@ private class InlineParserInstance(
         i++
         val sb = StringBuilder()
         while (i < input.length && input[i] != closeChar) {
-            if (input[i] == '\\' && i + 1 < input.length) {
+            if (input[i] == '\\' && i + 1 < input.length && CharacterUtils.isAsciiPunctuation(input[i + 1])) {
                 i++
                 sb.append(input[i])
             } else {
@@ -1291,33 +1332,85 @@ private class InlineParserInstance(
     private fun tryParseRefLink(bracket: BracketEntry): Pair<String, String?>? {
         val pos = scanner.pos
 
-        // [text][label]
+        // [text][label] - full reference link
         if (pos < input.length && input[pos] == '[') {
-            val closeIdx = input.indexOf(']', pos + 1)
+            val closeIdx = findCloseBracket(pos + 1)
             if (closeIdx >= 0) {
                 val label = input.substring(pos + 1, closeIdx)
-                val normalized = CharacterUtils.normalizeLinkLabel(label)
+                // reject labels that contain unescaped [
+                if (isValidLinkLabel(label)) {
+                    val normalized = CharacterUtils.normalizeLinkLabel(label)
+                    val def = document.linkDefinitions[normalized]
+                    if (def != null) {
+                        scanner.pos = closeIdx + 1
+                        return Pair(def.destination, def.title)
+                    }
+                }
+            }
+        }
+
+        // use raw text from input for label matching (preserves backslash escapes)
+        val closeBracketPos = scanner.pos - 1 // position of the ] we just consumed
+        val rawLabel = input.substring(bracket.contentStartPos, closeBracketPos)
+
+        // collapsed [label][]
+        if (pos + 1 < input.length && input[pos] == '[' && input[pos + 1] == ']') {
+            if (isValidLinkLabel(rawLabel)) {
+                val normalized = CharacterUtils.normalizeLinkLabel(rawLabel)
                 val def = document.linkDefinitions[normalized]
                 if (def != null) {
-                    scanner.pos = closeIdx + 1
+                    scanner.pos = pos + 2
                     return Pair(def.destination, def.title)
                 }
             }
         }
 
-        // 折叠 [label][] 或简写 [label]
-        val textContent = extractBracketText(bracket)
-        val normalized = CharacterUtils.normalizeLinkLabel(textContent)
-        val def = document.linkDefinitions[normalized]
-        if (def != null) {
-            // 检查 []
-            if (pos + 1 < input.length && input[pos] == '[' && input[pos + 1] == ']') {
-                scanner.pos = pos + 2
+        // shortcut [label] - only if next char is NOT [
+        // (per spec, full ref takes precedence, so [foo][bar] should not
+        // let [foo] match as shortcut when [bar][...] might match later)
+        if (pos >= input.length || input[pos] != '[') {
+            if (isValidLinkLabel(rawLabel)) {
+                val normalized = CharacterUtils.normalizeLinkLabel(rawLabel)
+                val def = document.linkDefinitions[normalized]
+                if (def != null) {
+                    return Pair(def.destination, def.title)
+                }
             }
-            return Pair(def.destination, def.title)
         }
 
         return null
+    }
+
+    /**
+     * find the next unescaped ] starting from position start.
+     * returns the index of ], or -1 if not found.
+     */
+    private fun findCloseBracket(start: Int): Int {
+        var i = start
+        while (i < input.length) {
+            when (input[i]) {
+                '\\' -> i += 2 // skip escaped char
+                ']' -> return i
+                else -> i++
+            }
+        }
+        return -1
+    }
+
+    /**
+     * check that a link label does not contain unescaped [ characters.
+     * per commonmark spec, link labels cannot contain unescaped brackets.
+     */
+    private fun isValidLinkLabel(label: String): Boolean {
+        var i = 0
+        while (i < label.length) {
+            when (label[i]) {
+                '\\' -> i += 2 // skip escaped char
+                '[' -> return false
+                else -> i++
+            }
+        }
+        return true
     }
 
     private fun tryParseFootnoteReference(bracket: BracketEntry): FootnoteReference? {
