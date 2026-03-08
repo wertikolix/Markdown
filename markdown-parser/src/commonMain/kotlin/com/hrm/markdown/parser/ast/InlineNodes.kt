@@ -278,3 +278,26 @@ class ShortcodeInline(
     override val literal: String get() = tagName
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitShortcodeInline(this)
 }
+
+/**
+ * 参考文献引用：`[@key]`。
+ *
+ * 引用 `[^bibliography]` 定义中的文献条目。
+ * 渲染为上标链接，如 [Smith2020]。
+ */
+class CitationReference(
+    /** 引用键，如 "smith2020" */
+    var key: String = "",
+) : LeafNode() {
+    override val literal: String get() = key
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitCitationReference(this)
+}
+
+/**
+ * 剧透/折叠文本：`>!spoiler text!<`。
+ *
+ * 点击才可见的剧透文本（Discord / Reddit 风格）。
+ */
+class Spoiler : ContainerNode() {
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitSpoiler(this)
+}

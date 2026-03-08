@@ -269,6 +269,7 @@ private class InlineParserInstance(
                 c == '$' && enableExtendedInline -> appendDollar()
                 c == ':' && enableExtendedInline -> appendPossibleEmoji()
                 c == '{' && scanner.peek(1) == '%' && enableExtendedInline -> appendShortcode()
+                c == '>' && scanner.peek(1) == '!' && enableExtendedInline -> appendSpoiler()
                 c == '\n' -> appendLineBreak()
                 else -> appendText()
             }
@@ -505,6 +506,23 @@ private class InlineParserInstance(
                 }
                 // 用脚注引用节点替换方括号开始符
                 bracket.llNode.astNode = footnoteRef
+                bracketTop = bracket.prev
+                return
+            }
+        }
+
+        // 尝试参考文献引用：[@key]
+        if (!bracket.isImage && enableExtendedInline) {
+            val citationRef = tryParseCitationReference(bracket)
+            if (citationRef != null) {
+                var cur = bracket.llNode.next
+                while (cur != null) {
+                    val next = cur.next
+                    removeLL(cur)
+                    cur.delimEntry?.let { removeDelim(it) }
+                    cur = next
+                }
+                bracket.llNode.astNode = citationRef
                 bracketTop = bracket.prev
                 return
             }
@@ -916,6 +934,7 @@ private class InlineParserInstance(
             if (enableExtendedInline && c == '=' && scanner.peek(1) == '=') break
             if (enableExtendedInline && c == '+' && scanner.peek(1) == '+') break
             if (enableExtendedInline && c == '{' && scanner.peek(1) == '%') break
+            if (enableExtendedInline && c == '>' && scanner.peek(1) == '!') break
 
             // ASCII 表情检测（非 : 开头的，如 ;) B) XD 等）
             if (enableAsciiEmoticons && (c == ';' || c == 'B' || c == 'X' || c == 'x' || c == '8' || c == 'O' || c == 'o')) {
@@ -1539,5 +1558,61 @@ private class InlineParserInstance(
         is HardLineBreak -> " "
         is ContainerNode -> node.children.joinToString("") { nodeToText(it) }
         is LeafNode -> node.literal
+    }
+
+    /**
+     * 尝试解析参考文献引用：[@key]
+     */
+    private fun tryParseCitationReference(bracket: BracketEntry): CitationReference? {
+        val text = extractBracketText(bracket)
+        // 格式：[@key]
+        if (!text.startsWith("@")) return null
+        val key = text.substring(1).trim()
+        if (key.isEmpty() || key.contains(' ') || key.contains('\n')) return null
+
+        // 不后跟 ( 或 [（否则可能是链接）
+        val pos = scanner.pos
+        if (pos < input.length && (input[pos] == '(' || input[pos] == '[')) return null
+
+        return CitationReference(key = key)
+    }
+
+    /**
+     * 解析剧透/折叠文本：>!spoiler text!<
+     */
+    private fun appendSpoiler() {
+        val pos = scanner.pos
+        scanner.advance() // skip '>'
+        if (scanner.isAtEnd || scanner.peek() != '!') {
+            scanner.pos = pos
+            appendText()
+            return
+        }
+        scanner.advance() // skip '!'
+
+        // 寻找匹配的 !<
+        val startContent = scanner.pos
+        while (!scanner.isAtEnd) {
+            if (scanner.peek() == '!' && scanner.pos + 1 < input.length && input[scanner.pos + 1] == '<') {
+                val content = input.substring(startContent, scanner.pos)
+                scanner.advance() // skip '!'
+                scanner.advance() // skip '<'
+
+                // 创建 Spoiler 容器节点，将内容作为子 Text
+                val spoiler = Spoiler()
+                spoiler.appendChild(Text(content))
+                appendLL(spoiler)
+                return
+            }
+            if (scanner.peek() == '\n') {
+                // 剧透不跨行
+                break
+            }
+            scanner.advance()
+        }
+
+        // 未找到匹配的 !<，回退
+        scanner.pos = pos
+        appendText()
     }
 }

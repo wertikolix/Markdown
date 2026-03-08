@@ -65,6 +65,11 @@ interface NodeVisitor<R> {
     fun visitKeyboardInput(node: KeyboardInput): R
     fun visitShortcodeBlock(node: ShortcodeBlock): R
     fun visitShortcodeInline(node: ShortcodeInline): R
+    fun visitTabBlock(node: TabBlock): R
+    fun visitTabItem(node: TabItem): R
+    fun visitBibliographyDefinition(node: BibliographyDefinition): R
+    fun visitCitationReference(node: CitationReference): R
+    fun visitSpoiler(node: Spoiler): R
 }
 
 /**
@@ -129,4 +134,9 @@ abstract class DefaultNodeVisitor<R>(private val defaultValue: R) : NodeVisitor<
     override fun visitKeyboardInput(node: KeyboardInput): R = defaultValue
     override fun visitShortcodeBlock(node: ShortcodeBlock): R = defaultValue
     override fun visitShortcodeInline(node: ShortcodeInline): R = defaultValue
+    override fun visitTabBlock(node: TabBlock): R = defaultValue
+    override fun visitTabItem(node: TabItem): R = defaultValue
+    override fun visitBibliographyDefinition(node: BibliographyDefinition): R = defaultValue
+    override fun visitCitationReference(node: CitationReference): R = defaultValue
+    override fun visitSpoiler(node: Spoiler): R = defaultValue
 }

@@ -1,9 +1,15 @@
 package com.hrm.markdown.renderer.inline
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -341,6 +347,72 @@ private fun AnnotatedString.Builder.renderInlineNode(
             }
         }
 
+        is CitationReference -> {
+            val linkAnnotation = LinkAnnotation.Clickable(
+                tag = "citation",
+                styles = TextLinkStyles(
+                    style = SpanStyle(
+                        color = theme.linkColor,
+                        fontSize = theme.footnoteStyle.fontSize,
+                        baselineShift = BaselineShift.Superscript,
+                    ),
+                ),
+                linkInteractionListener = {
+                    // 引用点击暂不处理，可扩展
+                },
+            )
+            withLink(linkAnnotation) {
+                append("[${node.key}]")
+            }
+        }
+
+        is Spoiler -> {
+            val id = "spoiler_${node.hashCode()}"
+            // 提取纯文本用于估算占位符尺寸
+            val plainText = extractPlainText(node)
+            val fontSize = theme.bodyStyle.fontSize.value
+            // 估算宽度：字符数 * 字体大小 * 0.6（中文字符更宽，取较大系数）
+            val avgCharWidth = plainText.sumOf { ch ->
+                if (ch.code > 0x7F) 12 else 7 // 中文字符约等宽，英文约半宽
+            }.toFloat() / 10f * (fontSize / 16f)
+            val placeholderWidth = (avgCharWidth + 8f).sp // 加上一点 padding
+            val placeholderHeight = (fontSize * 1.5f).sp
+
+            appendInlineContent(id, plainText)
+            inlineContents[id] = InlineTextContent(
+                placeholder = Placeholder(
+                    width = placeholderWidth,
+                    height = placeholderHeight,
+                    placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                ),
+            ) {
+                SpoilerContent(
+                    node = node,
+                    theme = theme,
+                    inlineContents = inlineContents,
+                    onLinkClick = onLinkClick,
+                    latexMeasurer = latexMeasurer,
+                    density = density,
+                )
+            }
+        }
+
+        is ShortcodeInline -> {
+            // 渲染行内短代码：显示标签名和参数
+            withStyle(SpanStyle(
+                fontFamily = FontFamily.Monospace,
+                fontSize = theme.bodyStyle.fontSize * 0.875f,
+                color = theme.linkColor,
+            )) {
+                val argsText = if (node.args.isNotEmpty()) {
+                    " " + node.args.entries.joinToString(" ") { (k, v) ->
+                        if (k.startsWith("_")) v else "$k=$v"
+                    }
+                } else ""
+                append("{% ${node.tagName}$argsText %}")
+            }
+        }
+
         else -> {
             if (node is ContainerNode) {
                 renderInlineChildren(node.children, theme, inlineContents, onLinkClick, latexMeasurer, density)
@@ -475,5 +547,56 @@ private fun inferStyleFromClasses(classes: List<String>, theme: MarkdownTheme): 
         fontWeight = fontWeight,
         fontStyle = fontStyle,
         textDecoration = textDecoration,
+    )
+}
+
+/**
+ * 递归提取节点的纯文本内容。
+ */
+private fun extractPlainText(node: Node): String = buildString {
+    when (node) {
+        is Text -> append(node.literal)
+        is InlineCode -> append(node.literal)
+        is ContainerNode -> node.children.forEach { append(extractPlainText(it)) }
+        else -> {}
+    }
+}
+
+/**
+ * 可点击的剧透文本 Composable。
+ * 初始状态下文字被遮挡（文字颜色 = 背景颜色），点击后揭示文字内容。
+ */
+@Composable
+private fun SpoilerContent(
+    node: Spoiler,
+    theme: MarkdownTheme,
+    inlineContents: MutableMap<String, InlineTextContent>,
+    onLinkClick: ((String) -> Unit)?,
+    latexMeasurer: LatexMeasurerState?,
+    density: Density?,
+) {
+    var revealed by remember { mutableStateOf(false) }
+    val annotated = remember(node, theme, revealed) {
+        buildAnnotatedString {
+            if (revealed) {
+                withStyle(SpanStyle(
+                    background = theme.spoilerColor,
+                )) {
+                    renderInlineChildren(node.children, theme, inlineContents, onLinkClick, latexMeasurer, density)
+                }
+            } else {
+                withStyle(SpanStyle(
+                    background = theme.spoilerColor,
+                    color = theme.spoilerColor,
+                )) {
+                    renderInlineChildren(node.children, theme, inlineContents, onLinkClick, latexMeasurer, density)
+                }
+            }
+        }
+    }
+    BasicText(
+        text = annotated,
+        modifier = Modifier.clickable { revealed = !revealed },
+        style = theme.bodyStyle,
     )
 }

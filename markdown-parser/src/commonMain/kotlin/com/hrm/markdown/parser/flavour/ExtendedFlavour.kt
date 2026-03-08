@@ -105,6 +105,7 @@ object ExtendedFlavour : MarkdownFlavour {
         PageBreakStarter(),            // 205
         ThematicBreakStarter(),        // 210
         ShortcodeBlockStarter(),       // 250
+        TabBlockStarter(),             // 295
         CustomContainerStarter(),      // 300
         FencedCodeBlockStarter(),      // 310
         MathBlockStarter(),            // 320
@@ -130,6 +131,7 @@ object ExtendedFlavour : MarkdownFlavour {
     override val postProcessors: List<PostProcessor> = listOf(
         HeadingIdProcessor(),          // 100
         BlockAttributeProcessor(),     // 150
+        BibliographyProcessor(),       // 180
         AbbreviationProcessor(),       // 200
         DiagramProcessor(),            // 300
         ColumnsLayoutProcessor(),      // 350

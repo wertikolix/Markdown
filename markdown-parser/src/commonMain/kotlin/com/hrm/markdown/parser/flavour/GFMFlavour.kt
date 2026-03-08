@@ -3,6 +3,7 @@ package com.hrm.markdown.parser.flavour
 import com.hrm.markdown.parser.block.postprocessors.PostProcessor
 import com.hrm.markdown.parser.block.starters.BlockStarter
 import com.hrm.markdown.parser.block.starters.TableStarter
+import com.hrm.markdown.parser.block.starters.ThematicBreakStarter
 
 /**
  * GitHub Flavored Markdown (GFM) 方言。
@@ -56,7 +57,7 @@ object GFMFlavour : MarkdownFlavour {
 
         // GFM 扩展：表格（优先级 200，插入到主题分隔线之前）
         val thematicBreakIndex = indexOfFirst {
-            it is com.hrm.markdown.parser.block.starters.ThematicBreakStarter
+            it is ThematicBreakStarter
         }
         if (thematicBreakIndex >= 0) {
             add(thematicBreakIndex, TableStarter())

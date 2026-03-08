@@ -427,3 +427,53 @@ class ShortcodeBlock(
 ) : ContainerNode() {
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitShortcodeBlock(this)
 }
+
+/**
+ * 内容标签页块（MkDocs Material 风格）：`=== "Tab Title"`。
+ *
+ * 语法：
+ * ```
+ * === "Tab 1"
+ *     Tab 1 内容
+ *
+ * === "Tab 2"
+ *     Tab 2 内容
+ * ```
+ *
+ * 包含多个 [TabItem] 子节点，每个子节点代表一个标签页。
+ */
+class TabBlock : ContainerNode() {
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitTabBlock(this)
+}
+
+/**
+ * 标签页中的单个标签项：`=== "Title"`。
+ *
+ * @property title 标签页标题
+ */
+class TabItem(
+    var title: String = "",
+) : ContainerNode() {
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitTabItem(this)
+}
+
+/**
+ * 参考文献定义块：`[^bibliography]: key: Author, "Title", Year`。
+ *
+ * 以特殊脚注 `[^bibliography]` 为标志的参考文献数据库，
+ * 包含一组键值对，每个键对应一条文献记录。
+ */
+class BibliographyDefinition : ContainerNode() {
+    /** 所有文献条目：key → BibEntry */
+    val entries: MutableMap<String, BibEntry> = mutableMapOf()
+
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitBibliographyDefinition(this)
+}
+
+/**
+ * 单条参考文献记录。
+ */
+data class BibEntry(
+    val key: String,
+    val content: String,
+)

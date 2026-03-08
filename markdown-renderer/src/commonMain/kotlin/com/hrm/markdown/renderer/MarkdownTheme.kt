@@ -126,6 +126,8 @@ data class MarkdownTheme(
     val codeBlockLineNumberColor: Color = Color(0xFF8C959F),
     /** 代码块高亮行背景色 */
     val codeBlockHighlightLineColor: Color = Color(0xFFFFF8C5),
+    /** 剧透文本遮挡色（文字颜色和背景色相同，点击后显示） */
+    val spoilerColor: Color = Color(0xFF3A3A3A),
 ) {
     companion object {
         /**
@@ -165,6 +167,7 @@ data class MarkdownTheme(
             codeBlockTitleBackground = Color(0xFF21262D),
             codeBlockLineNumberColor = Color(0xFF484F58),
             codeBlockHighlightLineColor = Color(0xFF3B2E00),
+            spoilerColor = Color(0xFF3D444D),
         )
 
         /**

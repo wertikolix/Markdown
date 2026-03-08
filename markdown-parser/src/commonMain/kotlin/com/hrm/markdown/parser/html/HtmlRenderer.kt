@@ -694,6 +694,57 @@ class HtmlRenderer(
         closeTag("span")
     }
 
+    override fun visitTabBlock(node: TabBlock) {
+        tag("div", mapOf("class" to "tab-block"))
+        sb.append('\n')
+        visitChildren(node)
+        closeTag("div")
+        sb.append('\n')
+    }
+
+    override fun visitTabItem(node: TabItem) {
+        tag("div", mapOf("class" to "tab-item", "data-tab-title" to node.title))
+        sb.append('\n')
+        visitChildren(node)
+        closeTag("div")
+        sb.append('\n')
+    }
+
+    override fun visitBibliographyDefinition(node: BibliographyDefinition) {
+        tag("div", mapOf("class" to "bibliography"))
+        sb.append('\n')
+        tag("h4")
+        sb.append("References")
+        closeTag("h4")
+        sb.append('\n')
+        tag("ol", mapOf("class" to "bibliography-list"))
+        sb.append('\n')
+        for ((key, entry) in node.entries) {
+            tag("li", mapOf("id" to "bib-$key"))
+            sb.append(escape(entry.content))
+            closeTag("li")
+            sb.append('\n')
+        }
+        closeTag("ol")
+        sb.append('\n')
+        closeTag("div")
+        sb.append('\n')
+    }
+
+    override fun visitCitationReference(node: CitationReference) {
+        tag("sup")
+        tag("a", mapOf("href" to "#bib-${node.key}", "class" to "citation-ref"))
+        sb.append("[${escape(node.key)}]")
+        closeTag("a")
+        closeTag("sup")
+    }
+
+    override fun visitSpoiler(node: Spoiler) {
+        tag("span", mapOf("class" to "spoiler"))
+        visitChildren(node)
+        closeTag("span")
+    }
+
     companion object {
         /**
          * 便捷方法：将 Document 渲染为 HTML 字符串。

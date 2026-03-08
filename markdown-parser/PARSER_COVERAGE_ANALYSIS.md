@@ -315,7 +315,29 @@
 
 > **备注**: `BlockAttributeProcessor` 后处理器（优先级 150）实现 kramdown/Pandoc 风格的块属性语法。支持两种用法：独立属性段落附加到前一个块并移除，段落尾部属性行附加到该段落并剥离属性文本。行内属性（Link、Image、StyledText）已在 `InlineParser.tryParseAttributes()` 中原生支持。
 
-**覆盖率**: 64/64 (100%)
+#### 参考文献引用（Bibliography / Citation，扩展）
+- ✅ `[@key]` 行内参考文献引用（渲染为上标链接）
+- ✅ `[^bibliography]: key: content` 参考文献定义块
+- ✅ 多条目参考文献列表（每行一条 `key: content` 格式）
+- ✅ `BibliographyDefinition` AST 节点（块级，携带 `entries: Map<String, BibEntry>`）
+- ✅ `CitationReference` AST 节点（行内，携带 `key` 字段）
+- ✅ `BibliographyProcessor` 后处理器（优先级 180，将脚注定义转换为参考文献定义）
+- ✅ HtmlRenderer 输出 `<div class="bibliography">` + `<sup><a class="citation-ref">` 格式
+
+> **备注**: 参考文献复用脚注定义的解析机制，通过 `BibliographyProcessor` 后处理器将 label 为 `"bibliography"` 的 `FootnoteDefinition` 转换为 `BibliographyDefinition` 节点。行内 `[@key]` 由 `InlineParser.tryParseCitationReference()` 在方括号闭合时检测。
+
+#### 内容标签页（Tabs，扩展）
+- ✅ `=== "Tab Title"` 标签页语法（MkDocs Material 风格）
+- ✅ 双引号和单引号标题
+- ✅ 多标签切换（多个 `===` 块连续排列）
+- ✅ 标签内容缩进 4 空格
+- ✅ 标签页内支持完整块级元素（代码块、列表、引用等）
+- ✅ `TabBlock` AST 节点（块级容器，包含多个 `TabItem` 子节点）
+- ✅ `TabItem` AST 节点（块级容器，携带 `title` 属性）
+
+> **备注**: `TabBlockStarter`（优先级 295）检测 `=== "Title"` 语法启动 TabBlock。`BlockParser` 通过缩进续行逻辑管理 TabItem 的内容归属，空行计数控制 TabItem 终止。渲染器以 Material 风格标签栏 + 内容面板呈现，支持交互式标签切换。
+
+**覆盖率**: 78/78 (100%)
 
 ---
 
@@ -564,7 +586,16 @@
 
 > **备注**: `STANDARD_EMOJI_MAP` 包含 200+ 标准短代码到 Unicode 的映射。`ASCII_EMOTICON_MAP` 包含 40+ 常见 ASCII 表情。`appendPossibleEmoji()` 和 `appendText()` 分别处理 `:` 前缀和非 `:` 前缀的表情匹配。参数通过 `MarkdownParser` → `StreamingParser` → `IncrementalEngine` → `InlineParser` 链路传递。
 
-**覆盖率**: 33/33 (100%)
+#### 剧透/折叠文本（Spoiler，扩展）
+- ✅ `>!spoiler text!<` 剧透文本标记（Discord / Reddit 风格）
+- ✅ 文字颜色与背景色相同实现遮挡效果
+- ✅ 不跨行（遇到换行终止）
+- ✅ `Spoiler` AST 节点（行内容器）
+- ✅ 未闭合 `>!` 不解析（优雅降级为纯文本）
+
+> **备注**: `InlineParser.appendSpoiler()` 在 `>!` 开始标记处触发，扫描到 `!<` 结束标记生成 `Spoiler` 容器节点。渲染器使用 `theme.spoilerColor` 同时设置文字颜色和背景色，实现视觉遮挡效果。
+
+**覆盖率**: 38/38 (100%)
 
 ---
 
@@ -739,7 +770,7 @@
 | 7 | 表格（GFM） | 11/11 | 0 | 100% |
 | 8 | HTML 块 | 10/10 | 0 | 100% |
 | 9 | 链接引用定义 | 12/12 | 0 | 100% |
-| 10 | 块级扩展 | 64/64 | 0 | 100% |
+| 10 | 块级扩展 | 78/78 | 0 | 100% |
 | 11 | 强调 | 13/13 | 0 | 100% |
 | 12 | 删除线（GFM） | 4/4 | 0 | 100% |
 | 13 | 行内代码 | 8/8 | 0 | 100% |
@@ -748,13 +779,13 @@
 | 16 | 行内 HTML | 8/8 | 0 | 100% |
 | 17 | 转义与实体 | 10/10 | 0 | 100% |
 | 18 | 换行 | 5/5 | 0 | 100% |
-| 19 | 行内扩展 | 33/33 | 0 | 100% |
+| 19 | 行内扩展 | 38/38 | 0 | 100% |
 | 20 | 流式解析引擎 | 27/27 | 0 | 100% |
 | 21 | 字符与编码 | 10/10 | 0 | 100% |
 | 22 | HTML 生成器 | 12/12 | 0 | 100% |
 | 23 | 语法验证/Linting | 19/19 | 0 | 100% |
 | 24 | 短代码（Shortcodes） | 8/8 | 0 | 100% |
-| | **总计** | **372/372** | **0** | **100%** |
+| | **总计** | **391/391** | **0** | **100%** |
 
 ---
 
@@ -785,6 +816,8 @@ Results are written to `/tmp/commonmark-results.txt`.
 | `postProcessors` | none | none | abbreviation | heading ID, abbreviation, etc. |
 | `enableGfmAutolinks` | `false` | `true` | `false` | `true` |
 | `enableExtendedInline` | `false` | `true` | `true` | `true` |
+| `enableStrikethrough` | `false` | `true` | `true` | `true` |
+| `enableEmphasisCoalescing` | `false` | `true` | `false` | `false` |
 
 MarkdownExtra flavour (`MarkdownExtraFlavour` object):
 - 表格（GFM 兼容）、脚注（`[^label]` 定义与引用）、定义列表（`: definition`）
@@ -866,9 +899,6 @@ val html = HtmlRenderer.renderMarkdown(input, flavour = CommonMarkFlavour)
 |--------|------|----------|------|
 | **P3** | Wiki 链接 | `[[page]]` / `[[page\|显示文本]]` | Obsidian 风格内部链接语法，适用于知识库/笔记场景 |
 | **P3** | Figure / 图片标题 | 独立段落中的图片 | 将独立段落中的图片渲染为 `<figure>` + `<figcaption>`（Pandoc implicit_figures） |
-| **P3** | 参考文献引用 | `[@smith2020]` + `[^bibliography]: smith2020: ...` | 标准化参考文献引用语法，针对学术论文/技术专著场景 |
-| **P4** | 内容标签页 (Tabs) | `=== "Tab1"\n    内容` | 多标签切换显示不同内容（MkDocs Material 风格） |
-| **P4** | 剧透/折叠文本 | `>!spoiler!<` | 点击才可见的剧透文本（Discord / Reddit 风格） |
 | **P4** | Ruby 注音 | `{漢字\|かんじ}` | 中日文注音标注，渲染为 `<ruby>` HTML 元素 |
 | **P4** | 目录自动编号 | 标题编号 `1.1`, `1.2` | 为标题自动添加层级编号（渲染器层面） |
 | **P4** | 嵌入/Transclusion | `![[other-file]]` | 嵌入其他 Markdown 文件内容（Obsidian 风格） |

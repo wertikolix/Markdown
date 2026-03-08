@@ -603,6 +603,59 @@ class BlockParser(
                 cursor.restore(snap)
                 true
             }
+            is TabBlock -> {
+                // TabBlock 续行：检查是否有新的 === "Title" 行或缩进内容
+                val snap = cursor.snapshot()
+                val rest = cursor.rest()
+                if (rest.isBlank()) {
+                    // 空行在 TabBlock 内是允许的
+                    true
+                } else if (com.hrm.markdown.parser.block.starters.TabBlockStarter.isTabItemLine(rest)) {
+                    // 新的 tab item：添加到当前 TabBlock
+                    val title = com.hrm.markdown.parser.block.starters.TabBlockStarter.extractTabTitle(rest)!!
+                    val tabItem = TabItem(title = title)
+                    tabItem.lineRange = LineRange(currentLine, currentLine + 1)
+                    node.appendChild(tabItem)
+                    cursor.advance(cursor.remaining) // consume the line
+                    true
+                } else {
+                    val indent = cursor.advanceSpaces()
+                    if (indent >= 4) {
+                        // 缩进内容属于当前 tab item
+                        true
+                    } else {
+                        // 非缩进内容结束 TabBlock
+                        cursor.restore(snap)
+                        false
+                    }
+                }
+            }
+            is TabItem -> {
+                // TabItem 续行：类似 ListItem
+                if (cursor.restIsBlank()) {
+                    ob.blankLineCount++
+                    true
+                } else {
+                    val snap = cursor.snapshot()
+                    val rest = cursor.rest()
+                    // 新的 === 行结束当前 TabItem
+                    if (com.hrm.markdown.parser.block.starters.TabBlockStarter.isTabItemLine(rest)) {
+                        cursor.restore(snap)
+                        false
+                    } else {
+                        val indent = cursor.advanceSpaces(4)
+                        if (indent >= 4) {
+                            true
+                        } else if (ob.blankLineCount > 0) {
+                            cursor.restore(snap)
+                            false
+                        } else {
+                            // lazy continuation
+                            true
+                        }
+                    }
+                }
+            }
             // 单行块，永远不继续
             is Heading -> false
             is SetextHeading -> false
@@ -750,7 +803,7 @@ class BlockParser(
             }
             is ListBlock, is ListItem, is BlockQuote, is Document,
             is DefinitionList, is DefinitionDescription, is CustomContainer,
-            is ShortcodeBlock -> {
+            is ShortcodeBlock, is TabBlock, is TabItem -> {
                 // 容器块：创建新段落或处理懒延续
                 handleContainerLine(tip, cursor, lineIdx)
             }
@@ -837,6 +890,12 @@ class BlockParser(
             }
             is CustomContainer -> {
                 // 空行不终止自定义容器，由关闭围栏 ::: 决定
+            }
+            is TabBlock -> {
+                // 空行不终止 TabBlock
+            }
+            is TabItem -> {
+                tip.blankLineCount++
             }
             is ShortcodeBlock -> {
                 // blank lines do not close shortcode blocks, only {% endtag %} does
@@ -993,6 +1052,12 @@ class BlockParser(
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is ShortcodeBlock -> {
+                node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
+            }
+            is TabBlock -> {
+                node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
+            }
+            is TabItem -> {
                 node.lineRange = LineRange(ob.contentStartLine, ob.lastLineIndex + 1)
             }
             is Document -> {

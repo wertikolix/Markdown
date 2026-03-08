@@ -135,6 +135,13 @@ val previewCategories: List<PreviewCategory> = listOf(
         groups = extendedPreviewGroups
     ),
     PreviewCategory(
+        id = "shortcodes",
+        title = "短代码",
+        description = "块级/行内短代码：{% tag args %}...{% endtag %}",
+        icon = "🔧",
+        groups = shortcodePreviewGroups
+    ),
+    PreviewCategory(
         id = "diagram",
         title = "图表",
         description = "Mermaid 流程图、PlantUML 时序图",
