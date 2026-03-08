@@ -403,3 +403,18 @@ class PageBreak : LeafNode() {
     override val literal: String get() = ""
     override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitPageBreak(this)
 }
+
+/**
+ * block-level shortcode: `{% tag arg1 "arg2" key=value %}...{% endtag %}`.
+ *
+ * self-closing shortcodes (no end tag) are also represented as a block
+ * with empty children.
+ */
+class ShortcodeBlock(
+    /** shortcode tag name, e.g. "youtube", "include" */
+    var tagName: String = "",
+    /** positional and keyword arguments */
+    var args: Map<String, String> = emptyMap(),
+) : ContainerNode() {
+    override fun <R> accept(visitor: NodeVisitor<R>): R = visitor.visitShortcodeBlock(this)
+}

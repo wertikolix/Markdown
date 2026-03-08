@@ -478,6 +478,21 @@ class HtmlRenderer(
         sb.append('\n')
     }
 
+    override fun visitShortcodeBlock(node: ShortcodeBlock) {
+        val argsStr = node.args.entries.joinToString(" ") { "${it.key}=${it.value}" }
+        val attrs = mutableMapOf<String, String?>(
+            "data-shortcode" to node.tagName,
+        )
+        if (argsStr.isNotEmpty()) {
+            attrs["data-args"] = argsStr
+        }
+        tag("div", attrs)
+        sb.append('\n')
+        visitChildren(node)
+        closeTag("div")
+        sb.append('\n')
+    }
+
     // ─────────────── 行内节点 ───────────────
 
     override fun visitText(node: Text) {
@@ -651,6 +666,18 @@ class HtmlRenderer(
         tag("kbd")
         sb.append(escape(node.literal))
         closeTag("kbd")
+    }
+
+    override fun visitShortcodeInline(node: ShortcodeInline) {
+        val argsStr = node.args.entries.joinToString(" ") { "${it.key}=${it.value}" }
+        val attrs = mutableMapOf<String, String?>(
+            "data-shortcode" to node.tagName,
+        )
+        if (argsStr.isNotEmpty()) {
+            attrs["data-args"] = argsStr
+        }
+        tag("span", attrs)
+        closeTag("span")
     }
 
     companion object {

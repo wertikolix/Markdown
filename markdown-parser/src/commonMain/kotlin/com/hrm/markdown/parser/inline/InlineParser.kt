@@ -224,6 +224,7 @@ private class InlineParserInstance(
                 c == '^' && enableExtendedInline -> appendPairedDelim('^', 1)
                 c == '$' && enableExtendedInline -> appendDollar()
                 c == ':' && enableExtendedInline -> appendPossibleEmoji()
+                c == '{' && scanner.peek(1) == '%' && enableExtendedInline -> appendShortcode()
                 c == '\n' -> appendLineBreak()
                 else -> appendText()
             }
@@ -746,6 +747,28 @@ private class InlineParserInstance(
         appendLL(Text("$"))
     }
 
+    private fun appendShortcode() {
+        val pos = scanner.pos
+        // find the closing %}
+        val closeIdx = input.indexOf("%}", pos + 2)
+        if (closeIdx < 0) {
+            // not a valid shortcode, emit as text
+            scanner.advance() // {
+            appendLL(Text("{"))
+            return
+        }
+        val inner = input.substring(pos + 2, closeIdx).trim()
+        if (inner.isEmpty() || inner.startsWith("end")) {
+            scanner.advance()
+            appendLL(Text("{"))
+            return
+        }
+        // advance past the closing %}
+        scanner.pos = closeIdx + 2
+        val (tagName, args) = com.hrm.markdown.parser.block.starters.ShortcodeBlockStarter.parseShortcodeArgs(inner)
+        appendLL(ShortcodeInline(tagName = tagName, args = args))
+    }
+
     private fun appendPossibleEmoji() {
         val pos = scanner.pos
         scanner.advance() // skip ':'
@@ -845,6 +868,7 @@ private class InlineParserInstance(
             if (c == '!' && scanner.peek(1) == '[') break
             if (enableExtendedInline && c == '=' && scanner.peek(1) == '=') break
             if (enableExtendedInline && c == '+' && scanner.peek(1) == '+') break
+            if (enableExtendedInline && c == '{' && scanner.peek(1) == '%') break
 
             // ASCII 表情检测（非 : 开头的，如 ;) B) XD 等）
             if (enableAsciiEmoticons && (c == ';' || c == 'B' || c == 'X' || c == 'x' || c == '8' || c == 'O' || c == 'o')) {
