@@ -58,6 +58,19 @@ $$
                     )
                 }
             ),
+            PreviewItem(
+                id = "horizontal_scroll",
+                title = "超长公式横向滚动",
+                content = {
+                    Markdown(
+                        markdown = """
+$$
+\operatorname{score}(x)=\sum_{i=1}^{n}\frac{\alpha_i\beta_i\gamma_i\delta_i}{1+\exp\left(-\frac{x_i-\mu_i}{\sigma_i+\varepsilon}\right)}+\prod_{j=1}^{m}\left(1+\frac{\lambda_j^2}{\omega_j^2+\theta_j^2}\right)+\int_{0}^{T}\frac{\sin(\kappa t)+\cos(\rho t)}{\sqrt{1+t^2}}\,dt
+$$
+                        """.trimIndent()
+                    )
+                }
+            ),
         )
     ),
     PreviewGroup(
