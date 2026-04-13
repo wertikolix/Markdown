@@ -20,6 +20,8 @@ import com.hrm.markdown.renderer.LocalOnLinkClick
 import com.hrm.markdown.renderer.MarkdownImageData
 import com.hrm.latex.renderer.measure.rememberLatexMeasurer
 import com.hrm.markdown.renderer.inline.buildInlineAnnotatedString
+import com.hrm.markdown.renderer.inline.InlineFlowText
+import com.hrm.markdown.renderer.inline.InlineContentEntry
 import com.hrm.markdown.renderer.inline.rememberInlineContent
 
 /**
@@ -56,13 +58,16 @@ private fun SimpleParagraphRenderer(
 ) {
     val theme = LocalMarkdownTheme.current
     val onLinkClick = LocalOnLinkClick.current
-    val (annotated, inlineContents) = rememberInlineContent(node, onLinkClick)
-
-    BasicText(
-        text = annotated,
+    val inlineResult = rememberInlineContent(
+        parent = node,
+        onLinkClick = onLinkClick,
+        hostTextStyle = theme.bodyStyle,
+    )
+    InlineFlowText(
+        annotated = inlineResult.annotated,
+        inlineContents = inlineResult.inlineContents,
         modifier = modifier.fillMaxWidth(),
         style = theme.bodyStyle,
-        inlineContent = inlineContents,
     )
 }
 
@@ -101,16 +106,24 @@ private fun MixedParagraphRenderer(
         for (segment in segments) {
             when (segment) {
                 is ParagraphSegment.TextRun -> {
-                    val inlineContents = mutableMapOf<String, androidx.compose.foundation.text.InlineTextContent>()
+                    val inlineContents = mutableMapOf<String, InlineContentEntry>()
                     val annotated = buildInlineAnnotatedString(
-                        segment.nodes, theme, inlineContents, onLinkClick, latexMeasurer, density, textMeasurer, codeTheme
+                        nodes = segment.nodes,
+                        theme = theme,
+                        hostTextStyle = theme.bodyStyle,
+                        inlineContents = inlineContents,
+                        onLinkClick = onLinkClick,
+                        latexMeasurer = latexMeasurer,
+                        density = density,
+                        textMeasurer = textMeasurer,
+                        codeTheme = codeTheme,
                     )
                     if (annotated.isNotEmpty()) {
-                        BasicText(
-                            text = annotated,
+                        InlineFlowText(
+                            annotated = annotated,
+                            inlineContents = inlineContents,
                             modifier = Modifier.fillMaxWidth(),
                             style = theme.bodyStyle,
-                            inlineContent = inlineContents,
                         )
                     }
                 }

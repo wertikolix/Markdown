@@ -17,6 +17,7 @@ import com.hrm.markdown.parser.ast.FootnoteDefinition
 import com.hrm.markdown.parser.ast.HtmlBlock
 import com.hrm.markdown.renderer.LocalMarkdownTheme
 import com.hrm.markdown.renderer.MarkdownBlockChildren
+import com.hrm.markdown.renderer.inline.InlineFlowText
 import com.hrm.markdown.renderer.inline.rememberInlineContent
 
 /**
@@ -52,9 +53,13 @@ internal fun DefinitionListRenderer(
         for (child in node.children) {
             when (child) {
                 is DefinitionTerm -> {
-                    val (annotated, _) = rememberInlineContent(child)
-                    Text(
-                        text = annotated,
+                    val inlineResult = rememberInlineContent(
+                        parent = child,
+                        hostTextStyle = theme.bodyStyle.copy(fontWeight = FontWeight.Bold),
+                    )
+                    InlineFlowText(
+                        annotated = inlineResult.annotated,
+                        inlineContents = inlineResult.inlineContents,
                         style = theme.bodyStyle.copy(fontWeight = FontWeight.Bold),
                     )
                 }
