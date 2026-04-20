@@ -39,9 +39,11 @@ import com.hrm.latex.renderer.measure.rememberLatexMeasurer
 import com.hrm.latex.renderer.model.LatexConfig
 import com.hrm.markdown.parser.ast.*
 import com.hrm.markdown.renderer.LocalCodeHighlightTheme
+import com.hrm.markdown.renderer.LocalMarkdownDirectiveRegistry
 import com.hrm.markdown.renderer.LocalMarkdownTheme
 import com.hrm.markdown.renderer.LocalOnFootnoteClick
 import com.hrm.markdown.renderer.MarkdownTheme
+import com.hrm.markdown.runtime.DirectiveInlineRenderScope
 
 internal const val INLINE_PLACEHOLDER_TAG = "markdown-inline-placeholder"
 internal const val INLINE_PLACEHOLDER_CHAR = '\uFFFC'
@@ -67,12 +69,13 @@ internal fun rememberInlineContent(
     hostTextStyle: TextStyle = LocalMarkdownTheme.current.bodyStyle,
 ): InlineContentResult {
     val theme = LocalMarkdownTheme.current
+    val directiveRegistry = LocalMarkdownDirectiveRegistry.current
     val onFootnoteClick = LocalOnFootnoteClick.current
     val latexMeasurer = rememberLatexMeasurer()
     val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer()
     val inlineCodeTheme = LocalCodeHighlightTheme.current ?: LocalCodeTheme.current
-    return remember(parent, theme, onLinkClick, onFootnoteClick, hostTextStyle, latexMeasurer, density, textMeasurer, inlineCodeTheme) {
+    return remember(parent, theme, directiveRegistry, onLinkClick, onFootnoteClick, hostTextStyle, latexMeasurer, density, textMeasurer, inlineCodeTheme) {
         val inlineContents = mutableMapOf<String, InlineContentEntry>()
         val annotated = buildAnnotatedString {
             renderInlineChildren(
@@ -80,6 +83,7 @@ internal fun rememberInlineContent(
                 theme,
                 hostTextStyle,
                 inlineContents,
+                directiveRegistry,
                 onLinkClick,
                 onFootnoteClick,
                 latexMeasurer,
@@ -114,6 +118,7 @@ internal fun buildInlineAnnotatedString(
     theme: MarkdownTheme,
     hostTextStyle: TextStyle,
     inlineContents: MutableMap<String, InlineContentEntry>,
+    directiveRegistry: com.hrm.markdown.runtime.MarkdownDirectiveRegistry,
     onLinkClick: ((String) -> Unit)? = null,
     onFootnoteClick: ((String) -> Unit)? = null,
     latexMeasurer: LatexMeasurerState? = null,
@@ -126,6 +131,7 @@ internal fun buildInlineAnnotatedString(
             theme,
             hostTextStyle,
             inlineContents,
+            directiveRegistry,
             onLinkClick,
             onFootnoteClick,
             latexMeasurer,
@@ -140,6 +146,7 @@ private fun AnnotatedString.Builder.renderInlineChildren(
     theme: MarkdownTheme,
     hostTextStyle: TextStyle,
     inlineContents: MutableMap<String, InlineContentEntry>,
+    directiveRegistry: com.hrm.markdown.runtime.MarkdownDirectiveRegistry,
     onLinkClick: ((String) -> Unit)?,
     onFootnoteClick: ((String) -> Unit)?,
     latexMeasurer: LatexMeasurerState? = null,
@@ -148,7 +155,7 @@ private fun AnnotatedString.Builder.renderInlineChildren(
     inlineCodeTheme: com.hrm.codehigh.theme.CodeTheme? = null,
 ) {
     for (node in nodes) {
-        renderInlineNode(node, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+        renderInlineNode(node, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
     }
 }
 
@@ -157,6 +164,7 @@ private fun AnnotatedString.Builder.renderInlineNode(
     theme: MarkdownTheme,
     hostTextStyle: TextStyle,
     inlineContents: MutableMap<String, InlineContentEntry>,
+    directiveRegistry: com.hrm.markdown.runtime.MarkdownDirectiveRegistry,
     onLinkClick: ((String) -> Unit)?,
     onFootnoteClick: ((String) -> Unit)?,
     latexMeasurer: LatexMeasurerState? = null,
@@ -173,19 +181,19 @@ private fun AnnotatedString.Builder.renderInlineNode(
 
         is Emphasis -> {
             withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
         is StrongEmphasis -> {
             withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
         is Strikethrough -> {
             withStyle(theme.strikethroughStyle) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
@@ -237,7 +245,7 @@ private fun AnnotatedString.Builder.renderInlineNode(
                 },
             )
             withLink(linkAnnotation) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
@@ -378,7 +386,7 @@ private fun AnnotatedString.Builder.renderInlineNode(
 
         is Highlight -> {
             withStyle(SpanStyle(background = theme.highlightColor)) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
@@ -388,7 +396,7 @@ private fun AnnotatedString.Builder.renderInlineNode(
                     SpanStyle(baselineShift = BaselineShift.Superscript)
                 )
             ) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
@@ -398,13 +406,13 @@ private fun AnnotatedString.Builder.renderInlineNode(
                     SpanStyle(baselineShift = BaselineShift.Subscript)
                 )
             ) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
         is InsertedText -> {
             withStyle(theme.insertedTextStyle) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
@@ -424,10 +432,10 @@ private fun AnnotatedString.Builder.renderInlineNode(
             }
             if (spanStyle != null) {
                 withStyle(spanStyle) {
-                    renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                    renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
                 }
             } else {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
 
@@ -497,6 +505,7 @@ private fun AnnotatedString.Builder.renderInlineNode(
                     theme = theme,
                     hostTextStyle = hostTextStyle,
                     inlineContents = inlineContents,
+                    directiveRegistry = directiveRegistry,
                     onLinkClick = onLinkClick,
                     onFootnoteClick = onFootnoteClick,
                     latexMeasurer = latexMeasurer,
@@ -511,19 +520,44 @@ private fun AnnotatedString.Builder.renderInlineNode(
             )
         }
 
-        is ShortcodeInline -> {
-            // 渲染行内短代码：显示标签名和参数
-            withStyle(SpanStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = theme.bodyStyle.fontSize * 0.875f,
-                color = theme.linkColor,
-            )) {
-                val argsText = if (node.args.isNotEmpty()) {
-                    " " + node.args.entries.joinToString(" ") { (k, v) ->
-                        if (k.startsWith("_")) v else "$k=$v"
-                    }
-                } else ""
-                append("{% ${node.tagName}$argsText %}")
+        is DirectiveInline -> {
+            val alternateText = buildInlineDirectiveFallbackText(node)
+            val renderer = directiveRegistry.findInlineDirectiveRenderer(node.tagName)
+            if (renderer != null) {
+                val id = "directive_inline_${node.hashCode()}_${node.tagName}"
+                val fontSize = theme.bodyStyle.fontSize.value
+                val estimatedWidth = alternateText.sumOf { ch ->
+                    if (ch.code > 0x7F) 12 else 7
+                }.toFloat() / 10f * (fontSize / 16f)
+                appendInlinePlaceholder(id)
+                val itc = InlineTextContent(
+                    placeholder = Placeholder(
+                        width = (estimatedWidth + 8f).sp,
+                        height = (fontSize * 1.5f).sp,
+                        placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter,
+                    ),
+                ) {
+                    renderer(
+                        DirectiveInlineRenderScope(
+                            tagName = node.tagName,
+                            args = node.args,
+                            node = node,
+                            alternateText = alternateText,
+                        )
+                    )
+                }
+                inlineContents[id] = InlineContentEntry(
+                    alternateText = alternateText,
+                    inlineTextContent = itc,
+                )
+            } else {
+                withStyle(SpanStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = theme.bodyStyle.fontSize * 0.875f,
+                    color = theme.linkColor,
+                )) {
+                    append(alternateText)
+                }
             }
         }
 
@@ -579,10 +613,19 @@ private fun AnnotatedString.Builder.renderInlineNode(
 
         else -> {
             if (node is ContainerNode) {
-                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
             }
         }
     }
+}
+
+private fun buildInlineDirectiveFallbackText(node: DirectiveInline): String {
+    val argsText = if (node.args.isNotEmpty()) {
+        " " + node.args.entries.joinToString(" ") { (k, v) ->
+            if (k.startsWith("_")) v else "$k=$v"
+        }
+    } else ""
+    return "{% ${node.tagName}$argsText %}"
 }
 
 /**
@@ -736,6 +779,7 @@ private fun SpoilerContent(
     theme: MarkdownTheme,
     hostTextStyle: TextStyle,
     inlineContents: MutableMap<String, InlineContentEntry>,
+    directiveRegistry: com.hrm.markdown.runtime.MarkdownDirectiveRegistry,
     onLinkClick: ((String) -> Unit)?,
     onFootnoteClick: ((String) -> Unit)?,
     latexMeasurer: LatexMeasurerState?,
@@ -750,14 +794,14 @@ private fun SpoilerContent(
                 withStyle(SpanStyle(
                     background = theme.spoilerColor,
                 )) {
-                    renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                    renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
                 }
             } else {
                 withStyle(SpanStyle(
                     background = theme.spoilerColor,
                     color = theme.spoilerColor,
                 )) {
-                    renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
+                    renderInlineChildren(node.children, theme, hostTextStyle, inlineContents, directiveRegistry, onLinkClick, onFootnoteClick, latexMeasurer, density, textMeasurer, inlineCodeTheme)
                 }
             }
         }

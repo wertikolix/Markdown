@@ -71,10 +71,11 @@
 
 ```toml
 [versions]
-markdown = "1.0.3"
+markdown = "1.2.1"
 
 [libraries]
 markdown-parser = { module = "io.github.huarangmeng:markdown-parser", version.ref = "markdown" }
+markdown-runtime = { module = "io.github.huarangmeng:markdown-runtime", version.ref = "markdown" }
 markdown-renderer = { module = "io.github.huarangmeng:markdown-renderer", version.ref = "markdown" }
 ```
 
@@ -83,6 +84,7 @@ markdown-renderer = { module = "io.github.huarangmeng:markdown-renderer", versio
 ```kotlin
 dependencies {
     implementation(libs.markdown.parser)
+    implementation(libs.markdown.runtime)
     implementation(libs.markdown.renderer)
 }
 ```
@@ -119,6 +121,31 @@ fun MyScreen() {
 ```
 
 就这么简单 — **3 行代码**即可在所有平台上渲染精美的 Markdown。
+
+---
+
+## 🔌 插件扩展
+
+本项目提供“官方 directive 扩展网关 + runtime 输入转换器 + renderer 插件分发”的终极扩展方案：
+
+- `markdown-parser` 保持纯净：只解析 Markdown + 官方 directive AST
+- 外部特殊语法（例如 `!VIDEO[...]`）通过 transformer 转换为 `{% video ... %}`
+- renderer 通过插件注册表把 `video` directive 渲染为原生 Compose 内容
+
+示例：
+
+```kotlin
+Markdown(
+    markdown = """
+这里是自定义语法：
+
+!VIDEO[Demo](https://cdn.example.com/a.mp4){poster=https://cdn.example.com/a.jpg}
+    """.trimIndent(),
+    directivePlugins = listOf(VideoDirectivePlugin),
+)
+```
+
+完整架构说明见：[`PLUGIN_ARCHITECTURE_PLAN.md`](./PLUGIN_ARCHITECTURE_PLAN.md)
 
 ---
 
@@ -252,7 +279,7 @@ CompositionLocalProvider(
 | **高亮** | `==text==` |
 | **上标/下标** | `^text^`、`~text~`、`<sup>`、`<sub>` |
 | **插入文本** | `++text++` |
-| **Emoji** | `:smile:` 短代码 (200+)、ASCII 表情 (40+)、自定义映射 |
+| **Emoji** | `:smile:` 指令 (200+)、ASCII 表情 (40+)、自定义映射 |
 | **定义列表** | 术语 + `: definition` 格式 |
 | **Front Matter** | YAML (`---`) 和 TOML (`+++`) |
 | **目录 (TOC)** | `[TOC]` 支持深度、排除、排序选项 |
@@ -260,7 +287,7 @@ CompositionLocalProvider(
 | **图表块** | Mermaid、PlantUML、Graphviz 等 |
 | **多列布局** | `:::columns` 支持百分比/像素宽度 |
 | **选项卡块** | `=== "Tab Title"` MkDocs Material 风格 |
-| **短代码** | `{% tag args %}...{% endtag %}` 支持位置/关键字参数 |
+| **指令** | `{% tag args %}...{% endtag %}` 支持位置/关键字参数 |
 | **折叠文本** | `>!hidden text!<` Discord/Reddit 风格 |
 | **Wiki 链接** | `[[page]]`、`[[page\|显示文本]]` |
 | **注音 (Ruby)** | `{漢字\|かんじ}` 注音标注 |
@@ -443,7 +470,7 @@ Markdown(
 | 21 | 字符与编码 | 10/10 (100%) |
 | 22 | HTML 生成器 | 12/12 (100%) |
 | 23 | 诊断 / WCAG | 19/19 (100%) |
-| 24 | 短代码 | 8/8 (100%) |
+| 24 | 指令 | 8/8 (100%) |
 | | **总计** | **372/372 (100%)** |
 
 > 📖 完整详情：[PARSER_COVERAGE_ANALYSIS.md](./markdown-parser/PARSER_COVERAGE_ANALYSIS.md)

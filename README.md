@@ -71,10 +71,11 @@ Add to your `gradle/libs.versions.toml`:
 
 ```toml
 [versions]
-markdown = "1.0.3"
+markdown = "1.2.1"
 
 [libraries]
 markdown-parser = { module = "io.github.huarangmeng:markdown-parser", version.ref = "markdown" }
+markdown-runtime = { module = "io.github.huarangmeng:markdown-runtime", version.ref = "markdown" }
 markdown-renderer = { module = "io.github.huarangmeng:markdown-renderer", version.ref = "markdown" }
 ```
 
@@ -83,6 +84,7 @@ Then in your module's `build.gradle.kts`:
 ```kotlin
 dependencies {
     implementation(libs.markdown.parser)
+    implementation(libs.markdown.runtime)
     implementation(libs.markdown.renderer)
 }
 ```
@@ -119,6 +121,31 @@ fun MyScreen() {
 ```
 
 That's it — **3 lines** to render beautiful Markdown across all platforms.
+
+---
+
+## 🔌 Plugin Extensions
+
+This project ships a plugin-friendly architecture based on:
+
+- An official directive gateway (`{% tag ... %}`) parsed by `markdown-parser`
+- A runtime input transform pipeline to normalize custom syntax into directives
+- Renderer-side dispatch that maps directives (e.g. `video`) to native Compose blocks
+
+Example:
+
+```kotlin
+Markdown(
+    markdown = """
+Custom syntax:
+
+!VIDEO[Demo](https://cdn.example.com/a.mp4){poster=https://cdn.example.com/a.jpg}
+    """.trimIndent(),
+    directivePlugins = listOf(VideoDirectivePlugin),
+)
+```
+
+See the full plan: [`PLUGIN_ARCHITECTURE_PLAN.md`](./PLUGIN_ARCHITECTURE_PLAN.md)
 
 ---
 
@@ -260,7 +287,7 @@ CompositionLocalProvider(
 | **Diagram Blocks** | Mermaid, PlantUML, Graphviz, and more |
 | **Multi-Column Layout** | `:::columns` with percentage/pixel widths |
 | **Tab Blocks** | `=== "Tab Title"` MkDocs Material style |
-| **Shortcodes** | `{% tag args %}...{% endtag %}` with positional/keyword args |
+| **Directives** | `{% tag args %}...{% endtag %}` with positional/keyword args |
 | **Spoiler Text** | `>!hidden text!<` Discord/Reddit style |
 | **Wiki Links** | `[[page]]`, `[[page\|display text]]` |
 | **Ruby Text** | `{漢字\|かんじ}` pronunciation annotations |
@@ -443,7 +470,7 @@ Supports size specification in Markdown:
 | 21 | Character & Encoding | 10/10 (100%) |
 | 22 | HTML Generator | 12/12 (100%) |
 | 23 | Linting / WCAG | 19/19 (100%) |
-| 24 | Shortcodes | 8/8 (100%) |
+| 24 | Directives | 8/8 (100%) |
 | | **Total** | **372/372 (100%)** |
 
 > 📖 Full details: [PARSER_COVERAGE_ANALYSIS.md](./markdown-parser/PARSER_COVERAGE_ANALYSIS.md)

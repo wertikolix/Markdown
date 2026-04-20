@@ -35,6 +35,9 @@ import com.hrm.markdown.parser.ast.Node
 import com.hrm.markdown.parser.log.HLog
 import com.hrm.markdown.renderer.block.BlockRenderer
 import com.hrm.markdown.renderer.block.blockRenderRevision
+import com.hrm.markdown.runtime.MarkdownDirectivePlugin
+import com.hrm.markdown.runtime.MarkdownDirectiveRegistry
+import com.hrm.markdown.runtime.MarkdownDirectivePipeline
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -79,6 +82,7 @@ private const val TAG_RENDER = "MarkdownRender"
  * @param footer Markdown 内容后方插槽，会和正文处于同一滚动容器中
  * @param imageContent 自定义图片渲染组件，null 则使用默认占位渲染
  * @param onLinkClick 链接点击回调
+ * @param directivePlugins Markdown 指令插件列表，用于接入输入转换器和 directive 自定义渲染器
  */
 @Composable
 fun Markdown(
@@ -96,11 +100,20 @@ fun Markdown(
     footer: (@Composable () -> Unit)? = null,
     imageContent: MarkdownImageRenderer? = null,
     onLinkClick: ((String) -> Unit)? = null,
+    directivePlugins: List<MarkdownDirectivePlugin> = emptyList(),
 ) {
-    val document = rememberStreamingDocument(markdown, isStreaming, config)
+    val directiveRegistry = remember(directivePlugins) { MarkdownDirectiveRegistry(directivePlugins) }
+    val runtimePipeline = remember(directiveRegistry) { MarkdownDirectivePipeline(directiveRegistry) }
+    val effectiveStreaming = isStreaming && runtimePipeline.supportsStreamingFastPath
+    val document = rememberStreamingDocument(
+        markdown = markdown,
+        isStreaming = effectiveStreaming,
+        config = config,
+        runtimePipeline = runtimePipeline,
+    )
 
     if (document == null) {
-        if (isStreaming) return
+        if (effectiveStreaming) return
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
@@ -112,7 +125,7 @@ fun Markdown(
             codeTheme = codeTheme,
             config = config,
             scrollState = scrollState,
-            isStreaming = isStreaming,
+            isStreaming = effectiveStreaming,
             enablePagination = enablePagination,
             enableScroll = enableScroll,
             initialBlockCount = initialBlockCount,
@@ -120,6 +133,7 @@ fun Markdown(
             footer = footer,
             imageContent = imageContent,
             onLinkClick = onLinkClick,
+            directiveRegistry = directiveRegistry,
         )
     }
 }
@@ -139,6 +153,7 @@ fun Markdown(
  * @param footer Markdown 内容后方插槽，会和正文处于同一滚动容器中
  * @param imageContent 自定义图片渲染组件，null 则使用默认占位渲染
  * @param onLinkClick 链接点击回调
+ * @param directivePlugins Markdown 指令插件列表，用于接入 directive 自定义渲染器
  */
 @Composable
 fun Markdown(
@@ -156,7 +171,9 @@ fun Markdown(
     footer: (@Composable () -> Unit)? = null,
     imageContent: MarkdownImageRenderer? = null,
     onLinkClick: ((String) -> Unit)? = null,
+    directivePlugins: List<MarkdownDirectivePlugin> = emptyList(),
 ) {
+    val directiveRegistry = remember(directivePlugins) { MarkdownDirectiveRegistry(directivePlugins) }
     InnerMarkdown(
         document = document,
         modifier = modifier,
@@ -172,6 +189,7 @@ fun Markdown(
         footer = footer,
         imageContent = imageContent,
         onLinkClick = onLinkClick,
+        directiveRegistry = directiveRegistry,
     )
 }
 
@@ -185,6 +203,7 @@ private fun rememberStreamingDocument(
     markdown: String,
     isStreaming: Boolean,
     config: MarkdownConfig = MarkdownConfig.Default,
+    runtimePipeline: MarkdownDirectivePipeline = MarkdownDirectivePipeline(MarkdownDirectiveRegistry.Empty),
 ): Document? {
     val parser = remember(config) {
         MarkdownParser(
@@ -194,9 +213,9 @@ private fun rememberStreamingDocument(
             enableLinting = config.enableLinting,
         )
     }
-    var state by remember(parser) { mutableStateOf(StreamingDocumentState<Document>()) }
+    var state by remember(parser, runtimePipeline) { mutableStateOf(StreamingDocumentState<Document>()) }
 
-    LaunchedEffect(markdown, isStreaming, parser) {
+    LaunchedEffect(markdown, isStreaming, parser, runtimePipeline) {
         state = updateStreamingDocumentState(
             markdown = markdown,
             isStreaming = isStreaming,
@@ -206,7 +225,7 @@ private fun rememberStreamingDocument(
             endStream = parser::endStream,
             parse = { value ->
                 withContext(Dispatchers.Default) {
-                    parser.parse(value)
+                    parser.parse(runtimePipeline.transform(value).markdown)
                 }
             }
         )
@@ -301,6 +320,7 @@ private fun InnerMarkdown(
     footer: (@Composable () -> Unit)? = null,
     imageContent: MarkdownImageRenderer? = null,
     onLinkClick: ((String) -> Unit)? = null,
+    directiveRegistry: MarkdownDirectiveRegistry = MarkdownDirectiveRegistry.Empty,
 ) {
     val latestDocument by rememberUpdatedState(document)
     var throttledDocument by remember { mutableStateOf(document) }
@@ -422,6 +442,7 @@ private fun InnerMarkdown(
             config = config,
             codeTheme = codeTheme,
             isStreaming = isStreaming,
+            directiveRegistry = directiveRegistry,
         ) {
             // 流式生成期间跳过 SelectionContainer：
             // SelectionContainer 在内容高频变化时会对内部布局做额外的 intrinsic 测量
