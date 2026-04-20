@@ -132,7 +132,7 @@ This project ships a plugin-friendly architecture based on:
 - A runtime input transform pipeline to normalize custom syntax into directives
 - Renderer-side dispatch that maps directives (e.g. `video`) to native Compose blocks
 
-Example:
+Basic usage:
 
 ```kotlin
 Markdown(
@@ -145,7 +145,50 @@ Custom syntax:
 )
 ```
 
-See the full plan: [`PLUGIN_ARCHITECTURE_PLAN.md`](./PLUGIN_ARCHITECTURE_PLAN.md)
+Plugin skeleton:
+
+```kotlin
+object VideoDirectivePlugin : MarkdownDirectivePlugin {
+    override val id: String = "video"
+
+    override val inputTransformers = listOf(VideoSyntaxTransformer())
+
+    override val blockDirectiveRenderers = mapOf(
+        "video" to { scope ->
+            VideoPlayer(
+                url = scope.args.getValue("url"),
+                poster = scope.args["poster"],
+                title = scope.args["title"],
+            )
+        }
+    )
+}
+
+class VideoSyntaxTransformer : MarkdownInputTransformer {
+    override val id: String = "video-syntax"
+
+    override fun transform(input: String): MarkdownTransformResult {
+        val normalized = input.replace(
+            Regex("""!VIDEO\[(.*?)\]\((.*?)\)\{poster=(.*?)\}""")
+        ) { match ->
+            val title = match.groupValues[1]
+            val url = match.groupValues[2]
+            val poster = match.groupValues[3]
+            """{% video title="$title" url="$url" poster="$poster" %}"""
+        }
+        return MarkdownTransformResult(markdown = normalized)
+    }
+}
+```
+
+HTML export uses the same directive pipeline:
+
+```kotlin
+val html = MarkdownHtml.render(
+    markdown = markdown,
+    directivePlugins = listOf(VideoDirectivePlugin),
+)
+```
 
 ---
 

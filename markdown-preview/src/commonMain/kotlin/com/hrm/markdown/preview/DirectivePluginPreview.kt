@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.hrm.markdown.renderer.Markdown
+import com.hrm.markdown.runtime.MarkdownBlockDirectiveRenderer
 import com.hrm.markdown.runtime.MarkdownInputTransformer
 import com.hrm.markdown.runtime.MarkdownDirectivePlugin
 import com.hrm.markdown.runtime.MarkdownTransformResult
@@ -50,7 +51,7 @@ internal val directivePluginPreviewGroups = listOf(
 private object VideoDirectivePlugin : MarkdownDirectivePlugin {
     override val id: String = "video"
     override val inputTransformers: List<MarkdownInputTransformer> = listOf(VideoSyntaxTransformer())
-    override val blockDirectiveRenderers = mapOf(
+    override val blockDirectiveRenderers: Map<String, MarkdownBlockDirectiveRenderer> = mapOf(
         "video" to { scope ->
             VideoCard(
                 title = scope.args["title"] ?: "Untitled",

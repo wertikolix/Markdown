@@ -783,6 +783,44 @@
 
 > **备注**: 指令解析器（`DirectiveBlockStarter` 块级 + `InlineParser` 行内）识别 `{% ... %}` 语法，解析标签名和参数列表。参数解析器支持三种格式混用：裸字符串位置参数、双引号/单引号字符串、`key=value` 键值对。块级指令通过 `{% endtag %}` 闭合，行内指令为自闭合。渲染器通过 `data-directive` 属性将指令语义传递给前端，便于 JS 插件进一步处理。
 
+#### Runtime / Renderer 集成
+- ✅ `markdown-runtime` 提供 `MarkdownDirectivePlugin`、`MarkdownDirectiveRegistry`、`MarkdownDirectivePipeline`
+- ✅ 输入转换器可将业务语法规范化为官方 directive，再进入 parser
+- ✅ Compose 侧支持 block / inline directive 原生渲染
+- ✅ HTML 导出支持 block / inline directive fallback
+- ✅ `MarkdownHtml.render(document, directivePlugins)` 与字符串入口共用同一条 directive 运行时链路
+- ✅ 流式模式下只要存在 transformer，就自动关闭 streaming fast path，保证转换正确性
+
+#### 当前用法
+
+```kotlin
+object VideoDirectivePlugin : MarkdownDirectivePlugin {
+    override val id: String = "video"
+
+    override val inputTransformers = listOf(VideoSyntaxTransformer())
+
+    override val blockDirectiveRenderers = mapOf(
+        "video" to { scope ->
+            VideoPlayer(
+                url = scope.args.getValue("url"),
+                poster = scope.args["poster"],
+                title = scope.args["title"],
+            )
+        }
+    )
+}
+
+Markdown(
+    markdown = markdown,
+    directivePlugins = listOf(VideoDirectivePlugin),
+)
+```
+
+#### 完成状态
+- ✅ directive 扩展架构已完成落地
+- ✅ parser 保持纯 AST，不引入 Compose 节点
+- ✅ runtime / renderer / preview / README 已全部切换到 Directive 命名
+
 **覆盖率**: 8/8 (100%)
 
 ---

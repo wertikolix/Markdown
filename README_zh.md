@@ -132,7 +132,7 @@ fun MyScreen() {
 - 外部特殊语法（例如 `!VIDEO[...]`）通过 transformer 转换为 `{% video ... %}`
 - renderer 通过插件注册表把 `video` directive 渲染为原生 Compose 内容
 
-示例：
+基础用法：
 
 ```kotlin
 Markdown(
@@ -145,7 +145,50 @@ Markdown(
 )
 ```
 
-完整架构说明见：[`PLUGIN_ARCHITECTURE_PLAN.md`](./PLUGIN_ARCHITECTURE_PLAN.md)
+插件骨架：
+
+```kotlin
+object VideoDirectivePlugin : MarkdownDirectivePlugin {
+    override val id: String = "video"
+
+    override val inputTransformers = listOf(VideoSyntaxTransformer())
+
+    override val blockDirectiveRenderers = mapOf(
+        "video" to { scope ->
+            VideoPlayer(
+                url = scope.args.getValue("url"),
+                poster = scope.args["poster"],
+                title = scope.args["title"],
+            )
+        }
+    )
+}
+
+class VideoSyntaxTransformer : MarkdownInputTransformer {
+    override val id: String = "video-syntax"
+
+    override fun transform(input: String): MarkdownTransformResult {
+        val normalized = input.replace(
+            Regex("""!VIDEO\[(.*?)\]\((.*?)\)\{poster=(.*?)\}""")
+        ) { match ->
+            val title = match.groupValues[1]
+            val url = match.groupValues[2]
+            val poster = match.groupValues[3]
+            """{% video title="$title" url="$url" poster="$poster" %}"""
+        }
+        return MarkdownTransformResult(markdown = normalized)
+    }
+}
+```
+
+HTML 导出会走同一条 directive 运行时链路：
+
+```kotlin
+val html = MarkdownHtml.render(
+    markdown = markdown,
+    directivePlugins = listOf(VideoDirectivePlugin),
+)
+```
 
 ---
 
